@@ -1,8 +1,34 @@
 import { NextRequest, NextResponse } from "next/server";
+import { readFile } from "fs/promises";
+import path from "path";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
 import { CONFIG } from "@/lib/rasa-data";
 import { buildQuotationHTML, type QuotationAddonLine } from "@/lib/quotation-pdf-html";
+
+async function resolveLogoDataUri(origin: string): Promise<string> {
+  const logoPath = CONFIG.logo.startsWith("/") ? CONFIG.logo : `/${CONFIG.logo}`;
+  const candidates = [
+    path.join(process.cwd(), "public", logoPath.replace(/^\//, "")),
+    path.join(process.cwd(), "..", "public", logoPath.replace(/^\//, "")),
+  ];
+  for (const file of candidates) {
+    try {
+      const buf = await readFile(file);
+      const ext = path.extname(file).toLowerCase();
+      const mime =
+        ext === ".svg"
+          ? "image/svg+xml"
+          : ext === ".jpg" || ext === ".jpeg"
+            ? "image/jpeg"
+            : "image/png";
+      return `data:${mime};base64,${buf.toString("base64")}`;
+    } catch {
+      /* try next */
+    }
+  }
+  return `${origin}${logoPath}`;
+}
 
 function paiseToRupees(n: number | null | undefined): number {
   return Math.round((n || 0) / 100);
@@ -68,7 +94,7 @@ export async function GET(req: NextRequest) {
     const bookingId = url.searchParams.get("bookingId");
     const shareToken = url.searchParams.get("share");
     const origin = url.origin;
-    const logo = `${origin}${CONFIG.logo.startsWith("/") ? CONFIG.logo : `/${CONFIG.logo}`}`;
+    const logo = await resolveLogoDataUri(origin);
 
     let menu: Record<string, string[]> = {};
     let addons: QuotationAddonLine[] = [];

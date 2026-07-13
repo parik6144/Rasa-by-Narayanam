@@ -51,14 +51,14 @@ function fmtMoney(n: number): string {
 }
 
 function fmtUnit(priceType: string): string {
-  if (priceType === "per_guest") return "Per guest";
-  if (priceType === "per_event") return "Per event";
-  return priceType || "—";
+  if (priceType === "per_guest") return "/guest";
+  if (priceType === "per_event") return "/event";
+  return priceType || "";
 }
 
 function statusLabel(status: string): string {
   const map: Record<string, string> = {
-    pending: "Pending confirmation",
+    pending: "Pending",
     confirmed: "Confirmed",
     menu_locked: "Menu locked",
     completed: "Completed",
@@ -70,61 +70,51 @@ function statusLabel(status: string): string {
 export function buildQuotationHTML(d: QuotationPdfData): string {
   const today = new Date().toLocaleDateString("en-IN", {
     day: "numeric",
-    month: "long",
+    month: "short",
     year: "numeric",
   });
   const validUntil = new Date();
   validUntil.setDate(validUntil.getDate() + 30);
   const validStr = validUntil.toLocaleDateString("en-IN", {
     day: "numeric",
-    month: "long",
+    month: "short",
     year: "numeric",
   });
 
-  const menuSections = Object.entries(d.menu)
+  const menuRows = Object.entries(d.menu)
     .map(([section, dishes]) => {
-      const chips = (dishes || [])
-        .map((dish) => `<span class="chip">${esc(dish)}</span>`)
-        .join("");
-      return `<div class="menu-block">
-        <div class="menu-block-head">${esc(section)}</div>
-        <div class="chips">${chips || `<span class="muted">To be finalized</span>`}</div>
-      </div>`;
+      const list = (dishes || []).join(", ") || "—";
+      return `<tr>
+        <td class="sec">${esc(section)}</td>
+        <td>${esc(list)}</td>
+      </tr>`;
     })
     .join("");
 
   const addonRows = d.addons
     .map((a) => {
-      const unit = a.price;
-      const line =
-        a.priceType === "per_guest" ? a.price * d.guests : a.price;
-      const name = a.choice ? `${a.name} — ${a.choice}` : a.name;
+      const line = a.priceType === "per_guest" ? a.price * d.guests : a.price;
+      const name = a.choice ? `${a.name} (${a.choice})` : a.name;
       return `<tr>
         <td>${esc(name)}</td>
-        <td class="center">${esc(fmtUnit(a.priceType))}</td>
-        <td class="right">${fmtMoney(unit)}</td>
-        <td class="right strong">${fmtMoney(line)}</td>
+        <td class="nowrap">${fmtMoney(a.price)}${esc(fmtUnit(a.priceType))}</td>
+        <td class="right">${fmtMoney(line)}</td>
       </tr>`;
     })
     .join("");
 
-  const customBlock =
+  const customRow =
     d.customDishes.length > 0
-      ? `<div class="menu-block accent">
-          <div class="menu-block-head">Custom requests</div>
-          <div class="chips">${d.customDishes
-            .map((x) => `<span class="chip">${esc(x)}</span>`)
-            .join("")}</div>
-        </div>`
+      ? `<tr><td class="sec">Custom</td><td>${esc(d.customDishes.join(", "))}</td></tr>`
       : "";
 
   const terms = [
-    ...CONFIG.terms,
-    `${CONFIG.advancePercent}% advance locks the booking date. Menu may be edited until ${CONFIG.editWindowDays} days before the event; thereafter it is locked for kitchen preparation.`,
-    `Cancellation: full refund until T-7 days, 50% until T-3 days, none thereafter. Prices in this quotation are valid for 30 days from issue.`,
+    ...CONFIG.terms.slice(0, 6),
+    `Menu editable until ${CONFIG.editWindowDays} days before the event; then kitchen-locked. Quote valid 30 days.`,
   ];
-
   const termLis = terms.map((t) => `<li>${esc(t)}</li>`).join("");
+
+  const venueLine = [d.venue, d.city].filter(Boolean).join(", ") || "Venue TBD";
 
   return `<!DOCTYPE html>
 <html lang="en">
@@ -132,339 +122,247 @@ export function buildQuotationHTML(d: QuotationPdfData): string {
 <meta charset="UTF-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Quotation ${esc(d.bookingRef)} — Rasa by Narayanam</title>
-<link rel="preconnect" href="https://fonts.googleapis.com" />
-<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-<link href="https://fonts.googleapis.com/css2?family=Cormorant+Garamond:ital,wght@0,500;0,600;0,700;1,500&family=Source+Sans+3:wght@400;500;600;700&display=swap" rel="stylesheet" />
 <style>
   :root {
-    --ink: #1a1218;
-    --muted: #6b5a62;
-    --line: #e6dcc8;
-    --cream: #faf6ee;
-    --paper: #ffffff;
-    --maroon: #8b1e2d;
-    --maroon-deep: #5c1420;
+    --ink: #2c2228;
+    --muted: #6e5f66;
+    --line: #e8dfd0;
+    --cream: #fbf7f0;
+    --maroon: #9c2a38;
     --gold: #b8892d;
-    --gold-soft: #d4b56a;
-    --header: #160e14;
   }
   * { box-sizing: border-box; margin: 0; padding: 0; }
-  html, body { background: #e8e0d2; color: var(--ink); font-family: "Source Sans 3", system-ui, sans-serif; }
-  body { padding: 20px 12px 48px; }
+  body {
+    font-family: Georgia, "Times New Roman", serif;
+    background: #efe8dc;
+    color: var(--ink);
+    font-size: 11px;
+    line-height: 1.35;
+    padding: 12px;
+  }
   .toolbar {
-    position: sticky; top: 0; z-index: 50;
-    display: flex; gap: 10px; justify-content: flex-end; align-items: center;
-    max-width: 210mm; margin: 0 auto 14px;
-    padding: 10px 12px; background: rgba(22,14,20,.92); border-radius: 10px;
-    backdrop-filter: blur(8px);
+    position: sticky; top: 0; z-index: 20;
+    max-width: 780px; margin: 0 auto 10px;
+    display: flex; gap: 8px; align-items: center; justify-content: flex-end;
+    padding: 8px 10px; background: #fff; border: 1px solid var(--line); border-radius: 8px;
   }
-  .toolbar span { color: rgba(250,246,238,.7); font-size: 12px; margin-right: auto; }
+  .toolbar span { margin-right: auto; color: var(--muted); font-family: system-ui, sans-serif; font-size: 12px; }
   .toolbar button {
-    border: 0; cursor: pointer; font-weight: 600; font-size: 13px;
-    padding: 10px 16px; border-radius: 8px;
-    background: linear-gradient(180deg, #f0d48a, #c6983a); color: #231318;
+    font-family: system-ui, sans-serif; font-size: 12px; font-weight: 600;
+    border: 1px solid var(--line); background: #fff; color: var(--ink);
+    padding: 7px 12px; border-radius: 6px; cursor: pointer;
   }
-  .toolbar button.ghost {
-    background: transparent; color: #faf6ee; border: 1px solid rgba(250,246,238,.35);
+  .toolbar button.primary { background: var(--maroon); color: #fff; border-color: var(--maroon); }
+
+  .page {
+    max-width: 780px; margin: 0 auto; background: #fff;
+    border: 1px solid var(--line); padding: 18px 22px 16px;
   }
 
-  .sheet {
-    width: 210mm; max-width: 100%; margin: 0 auto;
-    background: var(--paper);
-    box-shadow: 0 24px 60px -28px rgba(0,0,0,.45);
+  /* Compact letterhead — light, inline */
+  .head {
+    display: flex; justify-content: space-between; align-items: center; gap: 12px;
+    padding-bottom: 10px; border-bottom: 2px solid var(--gold); margin-bottom: 12px;
+  }
+  .brand { display: flex; align-items: center; gap: 10px; min-width: 0; }
+  .brand img { height: 42px; width: auto; display: block; object-fit: contain; }
+  .brand .name { font-size: 20px; letter-spacing: 0.14em; font-weight: 700; color: var(--ink); line-height: 1; }
+  .brand .name b { color: var(--gold); }
+  .brand .sub { font-family: system-ui, sans-serif; font-size: 9px; letter-spacing: 0.28em; text-transform: uppercase; color: var(--muted); margin-top: 3px; }
+  .meta { text-align: right; font-family: system-ui, sans-serif; font-size: 10px; color: var(--muted); line-height: 1.45; white-space: nowrap; }
+  .meta .ref { font-size: 14px; font-weight: 700; color: var(--maroon); letter-spacing: 0.04em; }
+  .meta .badge {
+    display: inline-block; margin-top: 3px; padding: 1px 7px; border-radius: 999px;
+    border: 1px solid var(--line); background: var(--cream); color: var(--ink); font-size: 9px;
   }
 
-  .letterhead {
-    background: linear-gradient(145deg, #160e14 0%, #2a1824 55%, #120b10 100%);
-    color: #faf6ee; padding: 28px 32px 24px; position: relative; overflow: hidden;
-  }
-  .letterhead::after {
-    content: ""; position: absolute; left: 0; right: 0; bottom: 0; height: 3px;
-    background: linear-gradient(90deg, var(--maroon), var(--gold), var(--maroon));
-  }
-  .lh-top { display: flex; justify-content: space-between; gap: 20px; align-items: flex-start; }
-  .brand { display: flex; gap: 14px; align-items: center; }
-  .brand img { height: 58px; width: auto; object-fit: contain; }
-  .brand-name { font-family: "Cormorant Garamond", Georgia, serif; font-size: 30px; letter-spacing: .12em; font-weight: 600; line-height: 1; }
-  .brand-name b { color: var(--gold-soft); font-weight: 700; }
-  .brand-sub { font-size: 10px; letter-spacing: .38em; text-transform: uppercase; color: rgba(250,246,238,.55); margin-top: 6px; }
-  .brand-tag { font-size: 11px; color: rgba(250,246,238,.7); margin-top: 8px; max-width: 280px; line-height: 1.45; }
-  .meta { text-align: right; min-width: 180px; }
-  .meta .doc-type { font-size: 10px; letter-spacing: .28em; text-transform: uppercase; color: var(--gold-soft); font-weight: 600; }
-  .meta .ref { font-family: "Cormorant Garamond", Georgia, serif; font-size: 22px; color: #fff; margin-top: 4px; letter-spacing: .04em; }
-  .meta .pill {
-    display: inline-block; margin-top: 10px; padding: 4px 10px; border-radius: 999px;
-    font-size: 10px; letter-spacing: .08em; text-transform: uppercase;
-    background: rgba(184,137,45,.18); color: var(--gold-soft); border: 1px solid rgba(184,137,45,.35);
-  }
-  .meta dl { margin-top: 12px; font-size: 11px; color: rgba(250,246,238,.65); line-height: 1.7; }
-  .meta dt { display: inline; color: rgba(250,246,238,.45); }
-  .meta dd { display: inline; margin: 0 0 0 6px; color: #faf6ee; }
-  .meta dd::after { content: ""; display: block; }
-
-  .body { padding: 28px 32px 20px; }
-  .title-row { display: flex; justify-content: space-between; align-items: baseline; gap: 16px; margin-bottom: 18px; }
-  .title-row h1 {
-    font-family: "Cormorant Garamond", Georgia, serif; font-weight: 600;
-    font-size: 28px; color: var(--ink); line-height: 1.15;
-  }
-  .title-row h1 em { font-style: italic; color: var(--gold); }
-  .title-row .eyebrow { font-size: 10px; letter-spacing: .3em; text-transform: uppercase; color: var(--maroon); font-weight: 700; }
-
-  .grid-2 { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 22px; }
-  .card {
-    border: 1px solid var(--line); border-radius: 8px; padding: 14px 16px;
-    background: linear-gradient(180deg, #fffefb, var(--cream));
-    page-break-inside: avoid;
-  }
-  .card h3 {
-    font-size: 10px; letter-spacing: .22em; text-transform: uppercase;
-    color: var(--maroon); font-weight: 700; margin-bottom: 10px;
-  }
-  .card .line { font-size: 13px; line-height: 1.55; color: var(--ink); }
-  .card .line strong { font-weight: 600; }
-  .card .muted { color: var(--muted); font-size: 12px; }
-
-  .section { margin-top: 22px; page-break-inside: avoid; }
-  .section-head {
-    display: flex; justify-content: space-between; align-items: baseline;
-    border-bottom: 2px solid var(--gold); padding-bottom: 6px; margin-bottom: 12px;
-  }
-  .section-head h2 {
-    font-family: "Cormorant Garamond", Georgia, serif; font-size: 18px; font-weight: 600;
-  }
-  .section-head .amt { font-size: 13px; font-weight: 700; color: var(--maroon); }
-
-  .menu-block { margin-bottom: 12px; page-break-inside: avoid; }
-  .menu-block-head {
-    font-size: 11px; font-weight: 700; letter-spacing: .14em; text-transform: uppercase;
-    color: var(--maroon); margin-bottom: 6px;
-  }
-  .menu-block.accent .menu-block-head { color: var(--gold); }
-  .chips { display: flex; flex-wrap: wrap; gap: 6px; }
-  .chip {
-    display: inline-block; padding: 4px 10px; border-radius: 999px;
-    background: #f3ebe0; border: 1px solid #e2d5bf; font-size: 11.5px; color: var(--ink);
-  }
-  .muted { color: var(--muted); font-style: italic; font-size: 12px; }
-
-  table.lines { width: 100%; border-collapse: collapse; font-size: 12.5px; }
-  table.lines th {
-    text-align: left; font-size: 10px; letter-spacing: .12em; text-transform: uppercase;
-    color: var(--muted); border-bottom: 1px solid var(--line); padding: 8px 6px; font-weight: 700;
-  }
-  table.lines td { padding: 9px 6px; border-bottom: 1px solid #f0e8da; vertical-align: top; }
-  table.lines .right { text-align: right; }
-  table.lines .center { text-align: center; }
-  table.lines .strong { font-weight: 700; color: var(--maroon-deep); }
-
-  .commercial {
-    margin-top: 22px; border-radius: 10px; overflow: hidden;
-    border: 1px solid #2a1824; page-break-inside: avoid;
-  }
-  .commercial .head {
-    background: var(--header); color: #faf6ee; padding: 12px 18px;
-    font-family: "Cormorant Garamond", Georgia, serif; font-size: 17px;
-  }
-  .commercial .rows { padding: 8px 18px 14px; background: #1c1219; color: rgba(250,246,238,.82); }
-  .commercial .row { display: flex; justify-content: space-between; gap: 12px; padding: 7px 0; font-size: 13px; }
-  .commercial .row.dim { color: rgba(250,246,238,.55); font-size: 12px; }
-  .commercial .row.discount { color: #f0a8a8; }
-  .commercial .row.total {
-    border-top: 1px solid rgba(212,181,106,.35); margin-top: 6px; padding-top: 12px;
-    font-family: "Cormorant Garamond", Georgia, serif; font-size: 22px; color: #fff;
-  }
-  .commercial .row.total .val { color: var(--gold-soft); }
-  .pay-note {
-    margin-top: 10px; padding: 10px 12px; border-radius: 6px;
-    background: rgba(184,137,45,.12); border: 1px solid rgba(184,137,45,.28);
-    font-size: 11.5px; color: rgba(250,246,238,.78); line-height: 1.5;
+  .doc-title {
+    font-family: system-ui, sans-serif; font-size: 10px; letter-spacing: 0.22em;
+    text-transform: uppercase; color: var(--gold); font-weight: 700; margin-bottom: 8px;
   }
 
-  .notes-box {
-    margin-top: 16px; padding: 12px 14px; border-left: 3px solid var(--gold);
-    background: #faf6ee; font-size: 12px; color: var(--muted); line-height: 1.55;
-    page-break-inside: avoid;
+  /* Inline info strip */
+  .info {
+    display: grid; grid-template-columns: 1.1fr 1.2fr 1fr; gap: 8px;
+    background: var(--cream); border: 1px solid var(--line); border-radius: 6px;
+    padding: 8px 10px; margin-bottom: 12px; font-family: system-ui, sans-serif;
   }
-  .notes-box strong { color: var(--ink); display: block; margin-bottom: 4px; font-size: 11px; letter-spacing: .12em; text-transform: uppercase; }
+  .info .lbl { font-size: 8.5px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--muted); font-weight: 700; margin-bottom: 2px; }
+  .info .val { font-size: 11px; color: var(--ink); line-height: 1.35; }
+  .info .val b { font-weight: 700; }
+
+  .cols { display: grid; grid-template-columns: 1.45fr 1fr; gap: 14px; align-items: start; }
+  .block-title {
+    font-family: system-ui, sans-serif; font-size: 10px; letter-spacing: 0.16em;
+    text-transform: uppercase; color: var(--maroon); font-weight: 700;
+    border-bottom: 1px solid var(--line); padding-bottom: 4px; margin-bottom: 6px;
+  }
+
+  table { width: 100%; border-collapse: collapse; font-family: system-ui, sans-serif; font-size: 10.5px; }
+  table.menu td { padding: 3px 0; vertical-align: top; border-bottom: 1px solid #f1ebe1; }
+  table.menu td.sec {
+    width: 28%; padding-right: 8px; color: var(--maroon); font-weight: 700;
+    font-size: 9.5px; letter-spacing: 0.04em; text-transform: uppercase;
+  }
+  table.addons th {
+    text-align: left; font-size: 8.5px; letter-spacing: 0.1em; text-transform: uppercase;
+    color: var(--muted); border-bottom: 1px solid var(--line); padding: 3px 4px; font-weight: 700;
+  }
+  table.addons td { padding: 3px 4px; border-bottom: 1px solid #f1ebe1; }
+  .right { text-align: right; }
+  .nowrap { white-space: nowrap; }
+
+  /* Light commercial box — not dark */
+  .totals {
+    background: #fff; border: 1px solid var(--line); border-radius: 6px; padding: 8px 10px;
+    font-family: system-ui, sans-serif;
+  }
+  .totals .row { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; font-size: 10.5px; color: var(--ink); }
+  .totals .row.dim { color: var(--muted); }
+  .totals .row.disc { color: var(--maroon); }
+  .totals .row.grand {
+    margin-top: 4px; padding-top: 6px; border-top: 1.5px solid var(--gold);
+    font-size: 13px; font-weight: 700; color: var(--ink);
+  }
+  .totals .row.grand .v { color: var(--maroon); }
+  .pay { margin-top: 6px; font-size: 9.5px; color: var(--muted); line-height: 1.4; }
+
+  .notes {
+    margin-top: 10px; padding: 6px 8px; background: var(--cream); border-left: 2px solid var(--gold);
+    font-family: system-ui, sans-serif; font-size: 10px; color: var(--muted);
+  }
+  .notes b { color: var(--ink); }
 
   .terms {
-    margin-top: 22px; padding: 14px 16px; border: 1px solid var(--line); border-radius: 8px;
-    background: #fffdf9; page-break-inside: avoid;
+    margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line);
+    font-family: system-ui, sans-serif;
   }
-  .terms h3 {
-    font-family: "Cormorant Garamond", Georgia, serif; font-size: 16px; color: var(--maroon);
-    margin-bottom: 8px;
-  }
-  .terms ol { padding-left: 18px; font-size: 11px; color: var(--muted); line-height: 1.65; }
-  .terms li { margin-bottom: 4px; }
+  .terms h4 { font-size: 10px; letter-spacing: 0.14em; text-transform: uppercase; color: var(--maroon); margin-bottom: 4px; }
+  .terms ol { padding-left: 14px; color: var(--muted); font-size: 9px; line-height: 1.4; columns: 2; column-gap: 16px; }
+  .terms li { margin-bottom: 2px; break-inside: avoid; }
 
-  .signoff {
-    margin-top: 28px; display: grid; grid-template-columns: 1.2fr 1fr; gap: 18px;
-    page-break-inside: avoid;
+  .foot {
+    margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--line);
+    display: flex; justify-content: space-between; gap: 12px;
+    font-family: system-ui, sans-serif; font-size: 9.5px; color: var(--muted);
   }
-  .signoff .company { font-size: 12px; color: var(--muted); line-height: 1.6; }
-  .signoff .company .name {
-    font-family: "Cormorant Garamond", Georgia, serif; font-size: 18px; color: var(--ink);
-    margin-bottom: 4px;
-  }
-  .sign-line {
-    margin-top: 36px; border-top: 1px solid var(--line); padding-top: 8px;
-    font-size: 11px; color: var(--muted); text-align: center;
-  }
+  .foot .co { color: var(--ink); font-weight: 700; font-size: 11px; }
 
-  .footer {
-    margin-top: 24px; padding: 16px 32px 22px; background: #120b10; color: rgba(250,246,238,.55);
-    text-align: center; font-size: 11px; line-height: 1.6;
-  }
-  .footer .deva {
-    font-family: "Cormorant Garamond", Georgia, serif; font-size: 22px; color: var(--gold-soft);
-    margin-bottom: 4px;
-  }
-  .footer a { color: var(--gold-soft); text-decoration: none; }
-
-  @page { size: A4; margin: 12mm; }
+  @page { size: A4; margin: 10mm; }
   @media print {
     body { background: #fff; padding: 0; }
     .toolbar { display: none !important; }
-    .sheet { box-shadow: none; width: auto; }
-    a { color: inherit; text-decoration: none; }
+    .page { border: none; max-width: none; padding: 0; }
+    .terms ol { columns: 2; }
   }
-  @media (max-width: 720px) {
-    .grid-2, .signoff, .lh-top { grid-template-columns: 1fr; display: grid; }
-    .meta { text-align: left; }
-    .body, .letterhead { padding-left: 18px; padding-right: 18px; }
+  @media (max-width: 640px) {
+    .info, .cols { grid-template-columns: 1fr; }
+    .terms ol { columns: 1; }
+    .meta { white-space: normal; }
   }
 </style>
 </head>
 <body>
   <div class="toolbar">
-    <span>Rasa quotation · ${esc(d.bookingRef)}</span>
-    <button type="button" class="ghost" onclick="window.close()">Close</button>
-    <button type="button" onclick="window.print()">Save / Print PDF</button>
+    <span>${esc(d.bookingRef)}</span>
+    <button type="button" onclick="window.close()">Close</button>
+    <button type="button" class="primary" onclick="window.print()">Save / Print PDF</button>
   </div>
 
-  <article class="sheet">
-    <header class="letterhead">
-      <div class="lh-top">
-        <div class="brand">
-          <img src="${esc(d.logo)}" alt="Rasa by Narayanam" />
-          <div>
-            <div class="brand-name">R<b>A</b>SA</div>
-            <div class="brand-sub">by Narayanam</div>
-            <div class="brand-tag">Premium celebration catering · Hygienic kitchen · Honestly priced</div>
-          </div>
+  <article class="page">
+    <header class="head">
+      <div class="brand">
+        <img src="${esc(d.logo)}" alt="Rasa by Narayanam" />
+        <div>
+          <div class="name">R<b>A</b>SA</div>
+          <div class="sub">by Narayanam</div>
         </div>
-        <div class="meta">
-          <div class="doc-type">Catering quotation</div>
-          <div class="ref">${esc(d.bookingRef)}</div>
-          <div class="pill">${esc(statusLabel(d.status))}</div>
-          <dl>
-            <dt>Issued</dt><dd>${esc(today)}</dd>
-            <dt>Valid until</dt><dd>${esc(validStr)}</dd>
-          </dl>
-        </div>
+      </div>
+      <div class="meta">
+        <div class="ref">${esc(d.bookingRef)}</div>
+        <div class="badge">${esc(statusLabel(d.status))}</div>
+        <div>Issued ${esc(today)} · Valid ${esc(validStr)}</div>
       </div>
     </header>
 
-    <div class="body">
-      <div class="title-row">
-        <div>
-          <div class="eyebrow">Formal estimate</div>
-          <h1>May your table carry <em>all six tastes.</em></h1>
-        </div>
+    <div class="doc-title">Catering quotation</div>
+
+    <div class="info">
+      <div>
+        <div class="lbl">Bill to</div>
+        <div class="val"><b>${esc(d.customerName)}</b><br/>${esc(d.customerPhone || "—")}<br/>${esc(d.customerEmail || "—")}</div>
+      </div>
+      <div>
+        <div class="lbl">Event</div>
+        <div class="val"><b>${esc(d.eventDate || "Date TBD")}</b><br/>${esc(venueLine)}<br/>${esc(d.occasion || "Occasion TBD")}</div>
+      </div>
+      <div>
+        <div class="lbl">Package</div>
+        <div class="val"><b>${esc(d.pkgName)}</b><br/>${d.guests} guests · ${fmtMoney(d.pkgPrice)}/guest</div>
+      </div>
+    </div>
+
+    <div class="cols">
+      <div>
+        <div class="block-title">Menu</div>
+        <table class="menu">
+          <tbody>
+            ${menuRows || `<tr><td colspan="2" style="color:var(--muted);font-style:italic;">Menu to be finalized</td></tr>`}
+            ${customRow}
+          </tbody>
+        </table>
+
+        ${
+          d.addons.length > 0
+            ? `<div class="block-title" style="margin-top:10px">Add-ons</div>
+        <table class="addons">
+          <thead><tr><th>Item</th><th>Rate</th><th class="right">Amount</th></tr></thead>
+          <tbody>${addonRows}</tbody>
+        </table>`
+            : ""
+        }
+
+        ${
+          d.notes
+            ? `<div class="notes"><b>Notes:</b> ${esc(d.notes)}</div>`
+            : ""
+        }
       </div>
 
-      <div class="grid-2">
-        <div class="card">
-          <h3>Bill to</h3>
-          <div class="line"><strong>${esc(d.customerName)}</strong></div>
-          <div class="line muted">${esc(d.customerPhone || "—")}</div>
-          <div class="line muted">${esc(d.customerEmail || "—")}</div>
-        </div>
-        <div class="card">
-          <h3>Event</h3>
-          <div class="line"><strong>${esc(d.eventDate || "Date TBD")}</strong></div>
-          <div class="line">${esc([d.venue, d.city].filter(Boolean).join(", ") || "Venue TBD")}</div>
-          <div class="line muted">${esc(d.occasion || "Occasion TBD")} · ${d.guests} guests</div>
-          <div class="line muted" style="margin-top:6px">${esc(d.pkgName)} @ ${fmtMoney(d.pkgPrice)} / guest</div>
-        </div>
-      </div>
-
-      <div class="commercial">
-        <div class="head">Commercial summary</div>
-        <div class="rows">
-          <div class="row"><span>Package (${esc(d.pkgName)} × ${d.guests})</span><span>${fmtMoney(d.pkgTotal)}</span></div>
+      <div>
+        <div class="block-title">Commercials</div>
+        <div class="totals">
+          <div class="row"><span>Package × ${d.guests}</span><span>${fmtMoney(d.pkgTotal)}</span></div>
           <div class="row"><span>Add-ons</span><span>${fmtMoney(d.addonsTotal)}</span></div>
           <div class="row dim"><span>Subtotal</span><span>${fmtMoney(d.subtotal)}</span></div>
           ${
             d.discount > 0
-              ? `<div class="row discount"><span>Discount${d.discountNote ? ` (${esc(d.discountNote)})` : ""}</span><span>− ${fmtMoney(d.discount)}</span></div>`
+              ? `<div class="row disc"><span>Discount${d.discountNote ? ` (${esc(d.discountNote)})` : ""}</span><span>− ${fmtMoney(d.discount)}</span></div>`
               : ""
           }
           <div class="row"><span>GST @ ${CONFIG.gstPercent}%</span><span>${fmtMoney(d.gst)}</span></div>
-          <div class="row total"><span>Estimated total</span><span class="val">${fmtMoney(d.total)}</span></div>
-          <div class="row dim"><span>Advance to book (${CONFIG.advancePercent}%)</span><span>${fmtMoney(d.advance)}</span></div>
-          <div class="row dim"><span>Balance due</span><span>${fmtMoney(d.balance)}</span></div>
-          <div class="pay-note">${esc(CONFIG.paymentTerms)}</div>
-        </div>
-      </div>
-
-      <section class="section">
-        <div class="section-head">
-          <h2>Menu selection</h2>
-          <div class="amt">${fmtMoney(d.pkgTotal)}</div>
-        </div>
-        ${menuSections || `<p class="muted">Menu details to be finalized with the kitchen.</p>`}
-        ${customBlock}
-      </section>
-
-      ${
-        d.addons.length > 0
-          ? `<section class="section">
-        <div class="section-head">
-          <h2>Add-ons</h2>
-          <div class="amt">${fmtMoney(d.addonsTotal)}</div>
-        </div>
-        <table class="lines">
-          <thead>
-            <tr><th>Item</th><th class="center">Unit</th><th class="right">Rate</th><th class="right">Amount</th></tr>
-          </thead>
-          <tbody>${addonRows}</tbody>
-        </table>
-      </section>`
-          : ""
-      }
-
-      ${
-        d.notes
-          ? `<div class="notes-box"><strong>Notes</strong>${esc(d.notes)}</div>`
-          : ""
-      }
-
-      <div class="terms">
-        <h3>Terms &amp; conditions</h3>
-        <ol>${termLis}</ol>
-      </div>
-
-      <div class="signoff">
-        <div class="company">
-          <div class="name">Narayanam Foods &amp; Catering</div>
-          Kitchen · ${esc(CONFIG.city)}, Jharkhand<br />
-          Serving ${esc(CONFIG.city)} &amp; 200 km radius<br />
-          ${esc(CONFIG.phoneDisplay)} · ${esc(CONFIG.email)}<br />
-          <a href="${esc(CONFIG.websiteUrl)}">${esc(CONFIG.website)}</a>
-        </div>
-        <div>
-          <div class="sign-line">Authorised quotation · Prepared for the guest</div>
+          <div class="row grand"><span>Total</span><span class="v">${fmtMoney(d.total)}</span></div>
+          <div class="row dim"><span>Advance (${CONFIG.advancePercent}%)</span><span>${fmtMoney(d.advance)}</span></div>
+          <div class="row dim"><span>Balance</span><span>${fmtMoney(d.balance)}</span></div>
+          <div class="pay">${esc(CONFIG.paymentTerms)}</div>
         </div>
       </div>
     </div>
 
-    <footer class="footer">
-      <div class="deva">रस</div>
-      Rasa by Narayanam · Kitchen live ${esc(CONFIG.launchDate)} · FSSAI licence pending<br />
-      This document is a commercial estimate. Final invoice may reflect confirmed guest count and approved menu changes.
+    <div class="terms">
+      <h4>Terms</h4>
+      <ol>${termLis}</ol>
+    </div>
+
+    <footer class="foot">
+      <div>
+        <div class="co">Narayanam Foods &amp; Catering</div>
+        ${esc(CONFIG.city)} · ${esc(CONFIG.phoneDisplay)} · ${esc(CONFIG.email)}
+      </div>
+      <div style="text-align:right">
+        ${esc(CONFIG.website)} · Kitchen live ${esc(CONFIG.launchDate)}<br/>
+        Prepared for the guest · FSSAI pending
+      </div>
     </footer>
   </article>
 </body>
