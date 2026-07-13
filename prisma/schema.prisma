@@ -1,0 +1,270 @@
+// Rasa by Narayanam — Prisma Schema
+// Full data model: users, packages, dishes, quotations, bookings, payments, chat, reviews
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "mysql"
+  url      = env("DATABASE_URL")
+}
+
+model User {
+  id           String   @id @default(cuid())
+  email        String   @unique
+  phone        String?  @unique
+  name         String?
+  passwordHash String?
+  role         String   @default("customer") // customer | admin
+  city         String?
+  dietaryPrefs String?  // JSON
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  quotations  Quotation[]
+  bookings    Booking[]
+  reviews     Review[]
+  conversations Conversation[]
+  payments    Payment[]
+}
+
+model Package {
+  id           String   @id @default(cuid())
+  slug         String   @unique
+  name         String
+  tagline      String
+  price        Int      // per guest, in paise (₹699 = 69900)
+  minGuests    Int      @default(100)
+  featured     Boolean  @default(false)
+  isActive     Boolean  @default(true)
+  displayOrder Int      @default(0)
+  sections     String   @db.LongText // denormalized JSON cache for fast reads
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  menuSections MenuSection[]
+  quotations   Quotation[]
+  bookings     Booking[]
+}
+
+model MenuSection {
+  id              String   @id @default(cuid())
+  packageId       String
+  name            String
+  selectionRule   String   // Any One | Any Two | All | Complimentary
+  selectionCount  Int      @default(1) // 999 = All, 0 = Complimentary
+  displayOrder    Int      @default(0)
+  isAll           Boolean  @default(false)
+  isComplimentary Boolean  @default(false)
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
+
+  package Package       @relation(fields: [packageId], references: [id], onDelete: Cascade)
+  dishes  SectionDish[]
+
+  @@index([packageId])
+}
+
+model Dish {
+  id        String   @id @default(cuid())
+  slug      String   @unique
+  name      String   @unique
+  isActive  Boolean  @default(true)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  sections SectionDish[]
+}
+
+model SectionDish {
+  id           String @id @default(cuid())
+  sectionId    String
+  dishId       String
+  displayOrder Int    @default(0)
+
+  section MenuSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  dish    Dish        @relation(fields: [dishId], references: [id], onDelete: Cascade)
+
+  @@unique([sectionId, dishId])
+  @@index([sectionId])
+  @@index([dishId])
+}
+
+model Addon {
+  id           String   @id @default(cuid())
+  slug         String   @unique
+  name         String
+  description  String?  @db.Text
+  price        Int      // in paise
+  priceType    String   // per_guest | per_event | flat | per_variety
+  category     String
+  isNv         Boolean  @default(false)
+  isActive     Boolean  @default(true)
+  choices      String?  @db.Text // JSON
+  displayOrder Int      @default(0)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @default(now()) @updatedAt
+}
+
+model Quotation {
+  id        String   @id @default(cuid())
+  userId    String
+  packageId String?
+  guests    Int      @default(100)
+  menu      String   // JSON: selected dishes
+  addons    String?  // JSON: selected addons
+  total     Int      @default(0) // in paise
+  status    String   @default("draft") // draft | sent | converted | expired
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  package Package? @relation(fields: [packageId], references: [id])
+}
+
+model Booking {
+  id           String   @id @default(cuid())
+  bookingRef   String   @unique
+  userId       String
+  packageId    String?
+  eventDate    DateTime
+  venue        String
+  city         String
+  guests       Int
+  status       String   @default("pending") // pending | confirmed | menu_locked | completed | cancelled
+  subtotal     Int      @default(0)
+  discount     Int      @default(0)
+  discountNote String?
+  gst          Int      @default(0)
+  total        Int      @default(0)
+  advancePaid  Int      @default(0)
+  balance      Int      @default(0)
+  notes        String?
+  menuSnapshot String?  // JSON snapshot of menu at booking time
+  addonsSnapshot String? // JSON
+  customDishes String?  // JSON — user-added custom dishes
+  occasion     String?
+  cancelledAt  DateTime?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
+  package Package? @relation(fields: [packageId], references: [id])
+  payments Payment[]
+  reviews  Review[]
+}
+
+model Lead {
+  id              String    @id @default(cuid())
+  name            String
+  phone           String
+  email           String?
+  eventDate       DateTime?
+  guests          Int?
+  city            String?
+  venue           String?
+  occasion        String?
+  message         String?
+  packageInterest String?
+  status          String    @default("new") // new | contacted | quoted | follow_up | won | lost
+  priority        String    @default("normal") // normal | high | urgent
+  source          String    @default("website") // website | whatsapp | phone | referral
+  notes           String?   @db.Text
+  followUps       String?   @db.Text // JSON timeline [{at,type,note,nextAt,files}]
+  attachments     String?   @db.Text // JSON all files [{name,url,size,mime,at}]
+  lastContactedAt DateTime?
+  followUpAt      DateTime?
+  lostReason      String?
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@index([followUpAt])
+  @@index([status])
+}
+
+model Notification {
+  id        String    @id @default(cuid())
+  userId    String
+  type      String
+  title     String
+  body      String    @db.Text
+  link      String?
+  readAt    DateTime?
+  meta      String?   @db.Text // JSON e.g. { leadId }
+  createdAt DateTime  @default(now())
+
+  @@index([userId, readAt])
+  @@index([userId, createdAt])
+}
+
+model QuotationShare {
+  id           String    @id @default(cuid())
+  token        String    @unique
+  quotationId  String?
+  bookingId    String?
+  menuJson     String    @db.LongText
+  addonsJson   String?   @db.Text
+  guests       Int
+  total        Int
+  expiresAt    DateTime
+  viewedAt     DateTime?
+  createdAt    DateTime  @default(now())
+}
+
+model Payment {
+  id         String   @id @default(cuid())
+  bookingId  String
+  userId     String
+  amount     Int
+  method     String   @default("upi")
+  status     String   @default("success")
+  gateway    String   @default("mock")
+  gatewayTxn String?  @unique
+  createdAt  DateTime @default(now())
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+}
+
+model Conversation {
+  id        String    @id @default(cuid())
+  userId    String
+  adminId   String?
+  status    String    @default("active")
+  rating    Int?
+  createdAt DateTime  @default(now())
+  closedAt  DateTime?
+
+  user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  messages Message[]
+}
+
+model Message {
+  id             String    @id @default(cuid())
+  conversationId String
+  senderType     String
+  senderId       String?
+  text           String    @db.Text
+  attachmentUrl  String?
+  readAt         DateTime?
+  createdAt      DateTime  @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+}
+
+model Review {
+  id         String   @id @default(cuid())
+  bookingId  String
+  userId     String
+  rating     Int
+  text       String?  @db.Text
+  photos     String?  @db.Text
+  isApproved Boolean  @default(false)
+  isFeatured Boolean  @default(false)
+  adminReply String?  @db.Text
+  createdAt  DateTime @default(now())
+
+  booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
+  user    User    @relation(fields: [userId], references: [id])
+}
