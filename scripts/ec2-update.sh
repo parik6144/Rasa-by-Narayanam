@@ -12,6 +12,11 @@ if [ -f /tmp/rasa.env.bak ]; then cp -a /tmp/rasa.env.bak .env; fi
 if [ -f .env ] && grep -q 'Rasa@2026Secure' .env; then
   sed -i 's/Rasa@2026Secure/Rasa%402026Secure/g' .env
 fi
+# Plain HTTP EC2 — cookies must not be Secure-only
+if [ -f .env ]; then
+  grep -q '^COOKIE_SECURE=' .env || echo 'COOKIE_SECURE=false' >> .env
+  sed -i 's/^COOKIE_SECURE=.*/COOKIE_SECURE=false/' .env
+fi
 git log -1 --oneline
 
 echo "== pause SelfAlgo for build RAM =="
