@@ -3,7 +3,7 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/store/app-store";
 import { CONFIG } from "@/lib/rasa-data";
-import { ArrowLeft, LogOut, Users, Calendar, IndianRupee, Bell, TrendingUp, MessageCircle, AlertCircle, UtensilsCrossed, X } from "lucide-react";
+import { ArrowLeft, LogOut, Users, Calendar, IndianRupee, Bell, TrendingUp, MessageCircle, AlertCircle, UtensilsCrossed, X, Paperclip, Send } from "lucide-react";
 import AdminCatalog from "@/components/rasa/admin-catalog";
 import AdminLeads from "@/components/rasa/admin-leads";
 
@@ -451,43 +451,208 @@ export default function AdminDashboard() {
   );
 }
 
+function fmtSessionWhen(iso: string | null | undefined) {
+  if (!iso) return "";
+  try {
+    return new Date(iso).toLocaleString("en-IN", {
+      day: "2-digit",
+      month: "short",
+      year: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
+  } catch {
+    return iso;
+  }
+}
+
 function AdminChat() {
-  const [conversations, setConversations] = useState<Array<{ id: string; status: string; user: { name: string | null; email: string } }>>([]);
+  const [conversations, setConversations] = useState<Array<{
+    id: string;
+    status: string;
+    closedAt?: string | null;
+    user: { name: string | null; email: string };
+  }>>([]);
   const [activeId, setActiveId] = useState<string | null>(null);
-  const [messages, setMessages] = useState<Array<{ id: string; senderType: string; text: string; createdAt: string }>>([]);
+  const [messages, setMessages] = useState<Array<{ id: string; senderType: string; text: string; attachmentUrl?: string | null; createdAt: string }>>([]);
   const [text, setText] = useState("");
   const [loading, setLoading] = useState(true);
+  const [uploading, setUploading] = useState(false);
+  const [peerTyping, setPeerTyping] = useState<string | null>(null);
+  const [chatStatus, setChatStatus] = useState<string>("active");
+  const [closedAt, setClosedAt] = useState<string | null>(null);
+  const listRef = useRef<HTMLDivElement>(null);
+  const fileRef = useRef<HTMLInputElement>(null);
+  const typingTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const lastTyped = useRef(0);
 
-  useEffect(() => {
-    fetch("/api/chat").then((r) => r.json()).then((d) => {
+  const loadConversations = useCallback(() => {
+    fetch("/api/chat", { credentials: "include" }).then((r) => r.json()).then((d) => {
       setConversations(d.conversations || []);
       setLoading(false);
     });
   }, []);
 
   useEffect(() => {
-    if (!activeId) return;
-    fetch(`/api/chat?conversationId=${activeId}`).then((r) => r.json()).then((d) => setMessages(d.messages || []));
-    const i = setInterval(() => {
-      fetch(`/api/chat?conversationId=${activeId}`).then((r) => r.json()).then((d) => setMessages(d.messages || []));
-    }, 3000);
+    loadConversations();
+    const i = setInterval(loadConversations, 8000);
     return () => clearInterval(i);
-  }, [activeId]);
+  }, [loadConversations]);
 
-  const send = async () => {
-    if (!text.trim() || !activeId) return;
+  const refreshMessages = useCallback(async (id: string) => {
+    const d = await fetch(`/api/chat?conversationId=${id}`, { credentials: "include" }).then((r) => r.json());
+    setMessages(d.messages || []);
+    setPeerTyping(d.typing?.senderType || null);
+    setChatStatus(d.status || "active");
+    setClosedAt(d.closedAt || null);
+    requestAnimationFrame(() => {
+      if (listRef.current) listRef.current.scrollTop = listRef.current.scrollHeight;
+    });
+  }, []);
+
+  const pollTyping = useCallback(async (id: string) => {
+    try {
+      const d = await fetch(`/api/chat/typing?conversationId=${id}`, { credentials: "include" }).then((r) => r.json());
+      setPeerTyping(d.typing?.senderType || null);
+      if (d.status) setChatStatus(d.status);
+      if (d.closedAt !== undefined) setClosedAt(d.closedAt || null);
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!activeId) return;
+    refreshMessages(activeId);
+    pollTyping(activeId);
+    const msgs = setInterval(() => refreshMessages(activeId), 2000);
+    const typ = setInterval(() => pollTyping(activeId), 500);
+    return () => {
+      clearInterval(msgs);
+      clearInterval(typ);
+    };
+  }, [activeId, refreshMessages, pollTyping]);
+
+  const notifyTyping = useCallback((on: boolean) => {
+    if (!activeId || chatStatus === "closed") return;
+    fetch("/api/chat/typing", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ conversationId: activeId, typing: on }),
+    }).catch(() => {});
+  }, [activeId, chatStatus]);
+
+  const onTextChange = (v: string) => {
+    setText(v);
+    if (!activeId || chatStatus === "closed") return;
+    if (!v.trim()) {
+      notifyTyping(false);
+      if (typingTimer.current) clearTimeout(typingTimer.current);
+      return;
+    }
+    const now = Date.now();
+    if (now - lastTyped.current > 200) {
+      lastTyped.current = now;
+      notifyTyping(true);
+    }
+    if (typingTimer.current) clearTimeout(typingTimer.current);
+    typingTimer.current = setTimeout(() => notifyTyping(false), 2800);
+  };
+
+  const endSession = async () => {
+    if (!activeId) return;
+    const res = await fetch("/api/chat/typing", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ conversationId: activeId, action: "close" }),
+    });
+    const d = await res.json();
+    if (res.ok) {
+      setChatStatus("closed");
+      setClosedAt(d.closedAt || new Date().toISOString());
+      setPeerTyping(null);
+      loadConversations();
+    }
+  };
+
+  const reopenSession = async () => {
+    if (!activeId) return;
+    const res = await fetch("/api/chat/typing", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      credentials: "include",
+      body: JSON.stringify({ conversationId: activeId, action: "reopen" }),
+    });
+    if (res.ok) {
+      setChatStatus("active");
+      setClosedAt(null);
+      loadConversations();
+    }
+  };
+
+  const sendPayload = async (payload: { text?: string; attachmentUrl?: string }) => {
+    if (!activeId || chatStatus === "closed") return;
+    notifyTyping(false);
+    const optimistic = {
+      id: "tmp-" + Date.now(),
+      senderType: "admin",
+      text: payload.text || (payload.attachmentUrl ? "[Image]" : ""),
+      attachmentUrl: payload.attachmentUrl || null,
+      createdAt: new Date().toISOString(),
+    };
+    setMessages((prev) => [...prev, optimistic]);
+    setText("");
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ conversationId: activeId, text }),
+      credentials: "include",
+      body: JSON.stringify({ conversationId: activeId, ...payload }),
     });
-    if (res.ok) {
-      setText("");
-      const d = await res.json();
-      const refresh = await fetch(`/api/chat?conversationId=${activeId}`).then((r) => r.json());
-      setMessages(refresh.messages || []);
+    if (res.ok) await refreshMessages(activeId);
+  };
+
+  const send = async () => {
+    if (!text.trim() || !activeId) return;
+    await sendPayload({ text: text.trim() });
+  };
+
+  const uploadFile = async (file: File) => {
+    if (!activeId || chatStatus === "closed") return;
+    setUploading(true);
+    try {
+      const fd = new FormData();
+      fd.append("conversationId", activeId);
+      fd.append("file", file);
+      const up = await fetch("/api/chat/upload", { method: "POST", credentials: "include", body: fd }).then((r) => r.json());
+      if (!up.file?.url) throw new Error(up.error || "Upload failed");
+      await sendPayload({
+        text: file.type.startsWith("image/") ? "" : `Shared: ${file.name}`,
+        attachmentUrl: up.file.url,
+      });
+    } catch {
+      /* ignore */
+    } finally {
+      setUploading(false);
     }
   };
+
+  const onPaste = async (e: React.ClipboardEvent) => {
+    const items = e.clipboardData?.items;
+    if (!items || !activeId || chatStatus === "closed") return;
+    for (const item of Array.from(items)) {
+      if (item.type.startsWith("image/")) {
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (file) await uploadFile(file);
+        return;
+      }
+    }
+  };
+
+  const activeConv = conversations.find((c) => c.id === activeId);
+  const isClosed = chatStatus === "closed";
 
   if (loading) return <div className="text-center py-8" style={{ color: "rgba(246,239,224,.62)" }}>Loading…</div>;
 
@@ -499,38 +664,147 @@ function AdminChat() {
           {conversations.length === 0 ? (
             <div className="p-6 text-center text-sm" style={{ color: "rgba(246,239,224,.62)" }}>No conversations yet.</div>
           ) : (
-            conversations.map((c) => (
-              <button key={c.id} onClick={() => setActiveId(c.id)} className="w-full p-4 text-left border-b transition-colors" style={{
-                borderColor: "var(--paper-line)",
-                background: activeId === c.id ? "rgba(198,152,58,.15)" : "transparent",
-              }}>
-                <div className="font-medium text-sm" style={{ color: "var(--ivory)" }}>{c.user.name || c.user.email}</div>
-                <div className="text-xs" style={{ color: "rgba(246,239,224,.62)" }}>{c.status}</div>
-              </button>
-            ))
+            conversations.map((c) => {
+              const ended = c.status === "closed";
+              return (
+                <button
+                  key={c.id}
+                  onClick={() => setActiveId(c.id)}
+                  className="w-full p-4 text-left border-b transition-colors"
+                  style={{
+                    borderColor: "var(--paper-line)",
+                    background: activeId === c.id
+                      ? ended ? "rgba(156,42,56,.22)" : "rgba(198,152,58,.15)"
+                      : ended ? "rgba(156,42,56,.08)" : "transparent",
+                    opacity: ended && activeId !== c.id ? 0.72 : 1,
+                  }}
+                >
+                  <div className="font-medium text-sm" style={{ color: ended ? "rgba(246,239,224,.55)" : "var(--ivory)" }}>
+                    {c.user.name || c.user.email}
+                  </div>
+                  <div className="text-xs mt-0.5" style={{ color: ended ? "var(--anaar-bright)" : "rgba(246,239,224,.62)" }}>
+                    {ended
+                      ? `Session ended · ${fmtSessionWhen(c.closedAt)}`
+                      : "Active"}
+                  </div>
+                </button>
+              );
+            })
           )}
         </div>
-        <div className="glass-panel rounded-lg flex flex-col">
+        <div
+          className="glass-panel rounded-lg flex flex-col"
+          style={isClosed ? { borderColor: "rgba(156,42,56,.45)", boxShadow: "inset 0 0 0 1px rgba(156,42,56,.2)" } : undefined}
+        >
           {!activeId ? (
             <div className="flex-1 flex items-center justify-center text-sm" style={{ color: "rgba(246,239,224,.62)" }}>Select a conversation</div>
           ) : (
             <>
-              <div className="flex-1 overflow-y-auto p-4 space-y-3">
-                {messages.map((m) => (
-                  <div key={m.id} className={`flex ${m.senderType === "admin" ? "justify-end" : "justify-start"}`}>
-                    <div className="max-w-[70%] px-3 py-2 rounded-lg text-sm" style={{
-                      background: m.senderType === "admin" ? "var(--gold)" : m.senderType === "bot" ? "rgba(156,42,56,.3)" : "rgba(246,239,224,.1)",
-                      color: m.senderType === "admin" ? "#231318" : "var(--ivory)",
-                    }}>
-                      {m.senderType === "bot" && <div className="text-[0.66rem] uppercase tracking-wider opacity-60 mb-1">Bot</div>}
-                      {m.text}
+              <div className="px-4 py-3 border-b flex items-center justify-between gap-3" style={{
+                borderColor: "var(--paper-line)",
+                background: isClosed ? "rgba(156,42,56,.18)" : "rgba(198,152,58,.08)",
+              }}>
+                <div>
+                  <div className="font-medium text-sm" style={{ color: "var(--ivory)" }}>
+                    {activeConv?.user.name || activeConv?.user.email || "Customer"}
+                  </div>
+                  <div className="text-[0.72rem]" style={{ color: isClosed ? "var(--anaar-bright)" : "rgba(246,239,224,.62)" }}>
+                    {isClosed ? `Session ended · ${fmtSessionWhen(closedAt)}` : "Live session"}
+                  </div>
+                </div>
+                {isClosed ? (
+                  <button onClick={reopenSession} className="text-xs px-3 py-1.5 rounded-md font-semibold" style={{ background: "rgba(198,152,58,.2)", color: "var(--gold-bright)" }}>
+                    Reopen
+                  </button>
+                ) : (
+                  <button onClick={endSession} className="text-xs px-3 py-1.5 rounded-md font-semibold" style={{ background: "rgba(156,42,56,.35)", color: "#f6c4c8" }}>
+                    End session
+                  </button>
+                )}
+              </div>
+              <div ref={listRef} className="flex-1 overflow-y-auto p-4 space-y-3">
+                {messages.map((m) => {
+                  const mine = m.senderType === "admin";
+                  return (
+                    <div key={m.id} className={`flex ${mine ? "justify-end" : "justify-start"}`}>
+                      <div className="max-w-[70%] px-3 py-2 rounded-lg text-sm" style={{
+                        background: mine ? "var(--gold)" : m.senderType === "bot" ? "rgba(156,42,56,.3)" : "rgba(246,239,224,.1)",
+                        color: mine ? "#231318" : "var(--ivory)",
+                      }}>
+                        {!mine && (
+                          <div className="text-[0.66rem] uppercase tracking-wider opacity-60 mb-1">
+                            {m.senderType === "bot" ? "Bot" : "Customer"}
+                          </div>
+                        )}
+                        {m.attachmentUrl && (
+                          <a href={m.attachmentUrl} target="_blank" rel="noopener noreferrer" className="block mb-1.5">
+                            {/\.(png|jpe?g|gif|webp)$/i.test(m.attachmentUrl) ? (
+                              // eslint-disable-next-line @next/next/no-img-element
+                              <img src={m.attachmentUrl} alt="Attachment" className="rounded-md max-h-44 object-cover" />
+                            ) : (
+                              <span className="underline text-xs flex items-center gap-1"><Paperclip className="w-3 h-3" /> Open file</span>
+                            )}
+                          </a>
+                        )}
+                        {m.text && m.text !== "[Image]" && m.text !== "[File]" && <div>{m.text}</div>}
+                      </div>
+                    </div>
+                  );
+                })}
+                {!isClosed && peerTyping === "user" && (
+                  <div className="flex justify-start">
+                    <div className="px-3 py-2 rounded-lg text-sm flex items-center gap-2" style={{ background: "rgba(246,239,224,.12)", color: "var(--ivory)" }}>
+                      <span className="text-[0.66rem] uppercase tracking-wider" style={{ color: "var(--gold-bright)" }}>Customer is typing</span>
+                      <span className="typing-dots flex gap-1 items-center h-3"><i /><i /><i /></span>
                     </div>
                   </div>
-                ))}
+                )}
+                {isClosed && (
+                  <div className="text-center py-3">
+                    <div
+                      className="inline-block px-4 py-2 rounded-full text-[0.78rem] font-medium"
+                      style={{ background: "rgba(156,42,56,.28)", color: "#f0b4b8", border: "1px solid rgba(190,63,73,.45)" }}
+                    >
+                      Session ended · {fmtSessionWhen(closedAt)}
+                    </div>
+                  </div>
+                )}
               </div>
-              <div className="p-3 border-t flex gap-2" style={{ borderColor: "var(--paper-line)" }}>
-                <input value={text} onChange={(e) => setText(e.target.value)} onKeyDown={(e) => e.key === "Enter" && send()} placeholder="Type a reply…" className="flex-1 px-3 py-2 rounded-md text-sm" style={{ background: "rgba(28,16,27,.5)", border: "1px solid var(--paper-line)", color: "var(--ivory)" }} />
-                <button onClick={send} className="glossy-btn-gold px-4 py-2 rounded-md text-sm font-semibold">Send</button>
+              <div className="p-3 border-t flex gap-2 items-end" style={{ borderColor: "var(--paper-line)", opacity: isClosed ? 0.55 : 1 }}>
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept="image/*,.pdf,text/plain"
+                  className="hidden"
+                  onChange={(e) => {
+                    const f = e.target.files?.[0];
+                    if (f) uploadFile(f);
+                    e.target.value = "";
+                  }}
+                />
+                <button
+                  type="button"
+                  onClick={() => fileRef.current?.click()}
+                  disabled={uploading || isClosed}
+                  className="p-2 rounded-md"
+                  style={{ color: "var(--gold-bright)", background: "rgba(198,152,58,.12)" }}
+                  title="Attach"
+                >
+                  <Paperclip className="w-4 h-4" />
+                </button>
+                <input
+                  value={text}
+                  onChange={(e) => onTextChange(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && !isClosed && send()}
+                  onPaste={onPaste}
+                  disabled={isClosed}
+                  placeholder={isClosed ? "Session ended — reopen to reply" : "Type a reply or paste an image…"}
+                  className="flex-1 px-3 py-2 rounded-md text-sm"
+                  style={{ background: "rgba(28,16,27,.5)", border: "1px solid var(--paper-line)", color: "var(--ivory)" }}
+                />
+                <button onClick={send} disabled={!text.trim() || uploading || isClosed} className="glossy-btn-gold px-4 py-2 rounded-md text-sm font-semibold disabled:opacity-50 flex items-center gap-1">
+                  <Send className="w-3.5 h-3.5" /> Send
+                </button>
               </div>
             </>
           )}

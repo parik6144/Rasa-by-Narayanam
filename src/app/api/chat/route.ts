@@ -42,6 +42,41 @@ async function ensureGuestUser(name: string, contact: string) {
   return user;
 }
 
+function botReplyFor(text: string) {
+  const lower = text.toLowerCase();
+  if (lower.includes("price") || lower.includes("cost") || lower.includes("rate")) {
+    return "Our packages start at ₹699/guest (Rasa Aarambh) and go up to ₹1,499/guest (Rasa Rajsi). Each package can be customized with add-ons like live stations, regional thalis, mithai studio, and mansahari. Would you like a custom quotation?";
+  }
+  if (lower.includes("book") || lower.includes("date")) {
+    return "To book, pick a package, customize the menu, and pay a 25% advance. We serve Jamshedpur and the 200km radius. What date are you planning for?";
+  }
+  if (lower.includes("veg") || lower.includes("jain")) {
+    return "Yes! We have full veg-only and Jain-friendly options across all packages. Just toggle the dietary preference in the menu builder.";
+  }
+  if (lower.includes("payment") || lower.includes("advance")) {
+    return "We take 25% advance to lock the booking, balance due 48 hours before the event. UPI, cards, and net banking accepted via Razorpay. GST invoice provided.";
+  }
+  if (text.includes("[Image]") || text.includes("[File]")) {
+    return "Got your file — thank you! Our team will review it shortly. For urgent help, call 7545 800 800.";
+  }
+  return "Thanks for your message! Our team will respond shortly. For urgent enquiries, call 7545 800 800.";
+}
+
+async function peerTypingFromDb(conversationId: string, myRole: string) {
+  const conv = await db.conversation.findUnique({
+    where: { id: conversationId },
+    select: { typingBy: true, typingUntil: true, status: true, closedAt: true },
+  });
+  if (!conv) return { typing: null as null, status: "active", closedAt: null as Date | null };
+  const until = conv.typingUntil ? new Date(conv.typingUntil).getTime() : 0;
+  const active = conv.typingBy && until > Date.now() && conv.typingBy !== myRole;
+  return {
+    typing: active ? { senderType: conv.typingBy as string } : null,
+    status: conv.status,
+    closedAt: conv.closedAt,
+  };
+}
+
 export async function GET(req: NextRequest) {
   const user = await getCurrentUser();
   if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
@@ -54,10 +89,16 @@ export async function GET(req: NextRequest) {
       where: { conversationId },
       orderBy: { createdAt: "asc" },
     });
-    return NextResponse.json({ messages });
+    const myType = user.role === "admin" ? "admin" : "user";
+    const meta = await peerTypingFromDb(conversationId, myType);
+    return NextResponse.json({
+      messages,
+      typing: meta.typing,
+      status: meta.status,
+      closedAt: meta.closedAt,
+    });
   }
 
-  // For customer: their conversations. For admin: all conversations.
   const where = user.role === "admin" ? {} : { userId: user.id };
   const conversations = await db.conversation.findMany({
     where,
@@ -72,18 +113,22 @@ export async function GET(req: NextRequest) {
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  const { conversationId, text, guestName, guestEmail } = body as {
+  const { conversationId, text, guestName, guestEmail, attachmentUrl } = body as {
     conversationId?: string;
     text?: string;
     guestName?: string;
     guestEmail?: string;
+    attachmentUrl?: string;
   };
-  if (!text) return NextResponse.json({ error: "Missing text" }, { status: 422 });
+
+  const trimmed = (text || "").trim();
+  if (!trimmed && !attachmentUrl) {
+    return NextResponse.json({ error: "Missing text or attachment" }, { status: 422 });
+  }
 
   let user = await getCurrentUser();
   let setCookieToken: string | null = null;
 
-  // Guest start: create/find customer and issue session so chat continues
   if (!user && guestName && guestEmail) {
     const guest = await ensureGuestUser(guestName, guestEmail);
     user = {
@@ -112,40 +157,80 @@ export async function POST(req: NextRequest) {
       data: { userId: user.id, status: "active" },
     });
     convId = conv.id;
+  } else {
+    const existing = await db.conversation.findUnique({ where: { id: convId } });
+    if (existing?.status === "closed") {
+      return NextResponse.json({ error: "This chat session has ended." }, { status: 423 });
+    }
   }
+
+  const senderType = user.role === "admin" ? "admin" : "user";
+
+  // Clear own typing flag in DB
+  await db.conversation.update({
+    where: { id: convId },
+    data: { typingBy: null, typingUntil: null },
+  }).catch(() => {});
+
+  const messageText =
+    trimmed ||
+    (attachmentUrl
+      ? attachmentUrl.match(/\.(png|jpe?g|gif|webp)$/i)
+        ? "[Image]"
+        : "[File]"
+      : "");
 
   const msg = await db.message.create({
     data: {
       conversationId: convId,
-      senderType: user.role === "admin" ? "admin" : "user",
+      senderType,
       senderId: user.id,
-      text,
+      text: messageText,
+      attachmentUrl: attachmentUrl || null,
     },
   });
 
-  // If customer sent message, generate an auto-reply (bot)
+  // Customer message → bot typing in DB, then delayed auto-reply
   if (user.role !== "admin") {
-    const lower = text.toLowerCase();
-    let reply = "Thanks for your message! Our team will respond shortly. For urgent enquiries, call 7545 800 800.";
-    if (lower.includes("price") || lower.includes("cost") || lower.includes("rate")) {
-      reply = "Our packages start at ₹699/guest (Rasa Aarambh) and go up to ₹1,499/guest (Rasa Rajsi). Each package can be customized with add-ons like live stations, regional thalis, mithai studio, and mansahari. Would you like a custom quotation?";
-    } else if (lower.includes("book") || lower.includes("date")) {
-      reply = "To book, pick a package, customize the menu, and pay a 25% advance. We serve Jamshedpur and the 200km radius. What date are you planning for?";
-    } else if (lower.includes("veg") || lower.includes("jain")) {
-      reply = "Yes! We have full veg-only and Jain-friendly options across all packages. Just toggle the dietary preference in the menu builder.";
-    } else if (lower.includes("payment") || lower.includes("advance")) {
-      reply = "We take 25% advance to lock the booking, balance due 48 hours before the event. UPI, cards, and net banking accepted via Razorpay. GST invoice provided.";
-    }
-    await db.message.create({
+    await db.conversation.update({
+      where: { id: convId },
       data: {
-        conversationId: convId,
-        senderType: "bot",
-        text: reply,
+        typingBy: "bot",
+        typingUntil: new Date(Date.now() + 4000),
       },
     });
+    const reply = botReplyFor(messageText);
+    const delay = 1200 + Math.floor(Math.random() * 900);
+    const id = convId;
+    setTimeout(async () => {
+      try {
+        await db.message.create({
+          data: {
+            conversationId: id,
+            senderType: "bot",
+            text: reply,
+          },
+        });
+      } catch {
+        /* ignore */
+      } finally {
+        try {
+          await db.conversation.update({
+            where: { id },
+            data: { typingBy: null, typingUntil: null },
+          });
+        } catch {
+          /* ignore */
+        }
+      }
+    }, delay);
   }
 
-  const res = NextResponse.json({ message: msg, conversationId: convId });
+  const res = NextResponse.json({
+    message: msg,
+    conversationId: convId,
+    botPending: user.role !== "admin",
+  });
   if (setCookieToken) setSessionCookie(res, setCookieToken);
   return res;
 }

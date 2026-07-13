@@ -43,6 +43,7 @@ export default function BookingWizard() {
   const [bookingRef, setBookingRef] = useState<string | null>(editingBookingRef);
   const [bookingId, setBookingId] = useState<string | null>(editingBookingId);
   const [savedAsEdit, setSavedAsEdit] = useState(false);
+  const [paidAdvance, setPaidAdvance] = useState(0);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [skipWarn, setSkipWarn] = useState(false);
@@ -176,7 +177,7 @@ export default function BookingWizard() {
     setBookingStep("event");
   };
 
-  const confirmBooking = async () => {
+  const confirmBooking = async (advancePaidNow = advance) => {
     if (!eventDate || !venue || !city) {
       setErr("Event date, venue and city are required");
       return;
@@ -196,6 +197,7 @@ export default function BookingWizard() {
         const res = await fetch("/api/bookings/update", {
           method: "PATCH",
           headers: { "Content-Type": "application/json" },
+          credentials: "include",
           body: JSON.stringify({
             bookingId: editingBookingId,
             eventDate, venue, city,
@@ -217,15 +219,17 @@ export default function BookingWizard() {
         setToast("Booking updated");
         clearEditingBooking();
       } else {
+        const payNow = Math.max(0, Math.round(advancePaidNow));
         const res = await fetch("/api/bookings", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
+          credentials: "include",
           body: JSON.stringify({
             packageId: pkg.id,
             eventDate, venue, city,
             guests: activeQuotation.guests,
             total,
-            advancePaid: advance,
+            advancePaid: payNow,
             menuSnapshot: activeQuotation.selectedDishes,
             addonsSnapshot,
             customDishes,
@@ -233,12 +237,20 @@ export default function BookingWizard() {
             notes,
           }),
         });
-        const data = await res.json();
-        if (!res.ok) throw new Error(data.error || "Booking failed");
+        const raw = await res.text();
+        let data: { error?: string; booking?: { bookingRef: string; id: string } } = {};
+        try {
+          data = raw ? JSON.parse(raw) : {};
+        } catch {
+          throw new Error(raw?.slice(0, 180) || `Booking failed (HTTP ${res.status})`);
+        }
+        if (!res.ok) throw new Error(data.error || `Booking failed (HTTP ${res.status})`);
+        if (!data.booking?.bookingRef) throw new Error("Booking saved but no reference returned");
+        setPaidAdvance(payNow);
         setBookingRef(data.booking.bookingRef);
         setBookingId(data.booking.id);
         setBookingStep("success");
-        setToast("Booking confirmed!");
+        setToast(payNow > 0 ? "Booking confirmed!" : "Booking confirmed — pay later");
       }
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "Booking failed");
@@ -786,7 +798,7 @@ export default function BookingWizard() {
             <p className="mb-6" style={{ color: "var(--on-ivory-dim)" }}>
               {isEditing
                 ? "Update logistics. Totals refresh with your menu & extras."
-                : `Enter date, venue and city. Advance of ₹${advance.toLocaleString("en-IN")} locks the booking.`}
+                : `Enter date, venue and city. Suggested advance is ₹${advance.toLocaleString("en-IN")} (${CONFIG.advancePercent}%) — you can also confirm with ₹0 now and pay later.`}
             </p>
             {eventDate && (
               <div className="rounded-lg p-3 mb-5 text-sm" style={{ background: "rgba(31,122,92,.08)", border: "1px solid rgba(31,122,92,.2)" }}>
@@ -837,15 +849,42 @@ export default function BookingWizard() {
 
             {err && <div className="text-center text-sm font-semibold mb-4" style={{ color: "var(--anaar)" }}>{err}</div>}
 
-            <div className="flex flex-col sm:flex-row gap-3">
-              <button onClick={() => setBookingStep("review")} className="flex-1 py-3.5 rounded-lg font-semibold" style={{ background: "#fff", border: "1px solid rgba(58,39,51,.2)" }}>Back</button>
-              <button onClick={confirmBooking} disabled={loading} className="flex-[1.5] glossy-btn-gold py-3.5 rounded-lg font-semibold disabled:opacity-60">
-                {loading
-                  ? "Saving…"
-                  : isEditing
-                    ? "Save changes"
-                    : `Pay ₹${advance.toLocaleString("en-IN")} & Confirm`}
-              </button>
+            <div className="rounded-xl p-4 mb-4 text-sm" style={{ background: "rgba(47,30,47,.06)", border: "1px solid rgba(58,39,51,.1)" }}>
+              <div className="flex justify-between mb-1"><span>Estimated total</span><b>₹{total.toLocaleString("en-IN")}</b></div>
+              <div className="flex justify-between" style={{ color: "var(--on-ivory-dim)" }}>
+                <span>Suggested advance ({CONFIG.advancePercent}%)</span>
+                <span>₹{advance.toLocaleString("en-IN")}</span>
+              </div>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              <button onClick={() => setBookingStep("review")} className="w-full py-3 rounded-lg font-semibold" style={{ background: "#fff", border: "1px solid rgba(58,39,51,.2)" }}>Back</button>
+              {isEditing ? (
+                <button onClick={() => confirmBooking(0)} disabled={loading} className="w-full glossy-btn-gold py-3.5 rounded-lg font-semibold disabled:opacity-60">
+                  {loading ? "Saving…" : "Save changes"}
+                </button>
+              ) : (
+                <>
+                  <button
+                    onClick={() => confirmBooking(advance)}
+                    disabled={loading}
+                    className="w-full glossy-btn-gold py-3.5 rounded-lg font-semibold disabled:opacity-60"
+                  >
+                    {loading ? "Confirming…" : `Pay ₹${advance.toLocaleString("en-IN")} & Confirm`}
+                  </button>
+                  <button
+                    onClick={() => confirmBooking(0)}
+                    disabled={loading}
+                    className="w-full py-3.5 rounded-lg font-semibold disabled:opacity-60"
+                    style={{ background: "#fff", border: "1.5px solid rgba(198,152,58,.55)", color: "#2c1a26" }}
+                  >
+                    {loading ? "Confirming…" : "Confirm with ₹0 now — pay later"}
+                  </button>
+                  <p className="text-center text-[0.78rem]" style={{ color: "var(--on-ivory-dim)" }}>
+                    Zero-payment booking is confirmed instantly. Our team will share payment timeline on call.
+                  </p>
+                </>
+              )}
             </div>
           </div>
         )}
@@ -858,7 +897,11 @@ export default function BookingWizard() {
               <h1 className="font-display text-[2.2rem] mb-2">{savedAsEdit ? "Booking updated!" : "Booking confirmed!"}</h1>
               <p className="mb-6" style={{ color: "var(--on-ivory-dim)" }}>
                 Reference <b style={{ color: "#2c1a26" }}>{bookingRef}</b>
-                {!savedAsEdit && <> · Advance ₹{advance.toLocaleString("en-IN")} received.</>}
+                {!savedAsEdit && (
+                  paidAdvance > 0
+                    ? <> · Advance ₹{paidAdvance.toLocaleString("en-IN")} recorded.</>
+                    : <> · Confirmed with ₹0 paid now — balance due as per our team.</>
+                )}
                 {" "}Our team will call you within 24 hours.
               </p>
             </div>

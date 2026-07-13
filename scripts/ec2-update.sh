@@ -19,6 +19,16 @@ if [ -f .env ]; then
 fi
 git log -1 --oneline
 
+echo "== MySQL schema patches (idempotent-ish) =="
+# Chat typing columns
+sudo mysql rasa_platform -e "ALTER TABLE conversation ADD COLUMN typingBy VARCHAR(191) NULL;" 2>/dev/null || true
+sudo mysql rasa_platform -e "ALTER TABLE conversation ADD COLUMN typingUntil DATETIME(3) NULL;" 2>/dev/null || true
+# Booking snapshots must fit large menu JSON
+sudo mysql rasa_platform -e "ALTER TABLE booking MODIFY COLUMN menuSnapshot LONGTEXT NULL;" 2>/dev/null || true
+sudo mysql rasa_platform -e "ALTER TABLE booking MODIFY COLUMN addonsSnapshot LONGTEXT NULL;" 2>/dev/null || true
+sudo mysql rasa_platform -e "ALTER TABLE booking MODIFY COLUMN customDishes LONGTEXT NULL;" 2>/dev/null || true
+sudo mysql rasa_platform -e "ALTER TABLE booking MODIFY COLUMN notes TEXT NULL;" 2>/dev/null || true
+
 echo "== pause SelfAlgo for build RAM =="
 pm2 stop selftradealgo || true
 pm2 stop rasa-by-narayanam || true

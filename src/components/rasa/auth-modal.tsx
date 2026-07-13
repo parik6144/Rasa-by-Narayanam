@@ -4,7 +4,7 @@ import { useApp } from "@/store/app-store";
 import { X, Mail, Lock, User as UserIcon, Phone, MapPin } from "lucide-react";
 
 export default function AuthModal() {
-  const { authModal, setAuthModal, setUser, setView, setToast } = useApp();
+  const { authModal, setAuthModal, setUser, setView, setToast, view } = useApp();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [name, setName] = useState("");
@@ -21,6 +21,10 @@ export default function AuthModal() {
     setLoading(true);
     setErr(null);
     try {
+      if (isRegister) {
+        const digits = phone.replace(/\D/g, "");
+        if (digits.length < 10) throw new Error("Please enter a valid 10-digit phone number");
+      }
       const res = await fetch(`/api/auth/${isRegister ? "register" : "login"}`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
@@ -32,8 +36,8 @@ export default function AuthModal() {
       setUser(data.user);
       setAuthModal("none");
       setToast(isRegister ? "Welcome to Rasa!" : "Logged in successfully");
-      setView("user-dashboard");
-      // reset form
+      // Stay in booking wizard if mid-booking; otherwise go to dashboard
+      if (view !== "booking") setView("user-dashboard");
       setEmail(""); setPassword(""); setName(""); setPhone(""); setCity("");
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "Auth failed");
@@ -73,7 +77,15 @@ export default function AuthModal() {
             <>
               <div className="relative">
                 <Phone className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
-                <input value={phone} onChange={(e) => setPhone(e.target.value)} placeholder="Phone (optional)" className="w-full rounded-md pl-10 pr-3 py-3 text-[0.95rem] border" style={{ background: "#fff", color: "#2c1a26", borderColor: "rgba(58,39,51,.22)" }} />
+                <input
+                  value={phone}
+                  onChange={(e) => setPhone(e.target.value)}
+                  placeholder="Phone number *"
+                  required
+                  inputMode="tel"
+                  className="w-full rounded-md pl-10 pr-3 py-3 text-[0.95rem] border"
+                  style={{ background: "#fff", color: "#2c1a26", borderColor: "rgba(58,39,51,.22)" }}
+                />
               </div>
               <div className="relative">
                 <MapPin className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />

@@ -153,10 +153,10 @@ model Booking {
   total        Int      @default(0)
   advancePaid  Int      @default(0)
   balance      Int      @default(0)
-  notes        String?
-  menuSnapshot String?  // JSON snapshot of menu at booking time
-  addonsSnapshot String? // JSON
-  customDishes String?  // JSON — user-added custom dishes
+  notes        String?  @db.Text
+  menuSnapshot String?  @db.LongText // JSON snapshot of menu at booking time
+  addonsSnapshot String? @db.LongText // JSON
+  customDishes String?  @db.LongText // JSON — user-added custom dishes
   occasion     String?
   cancelledAt  DateTime?
   createdAt    DateTime @default(now())
@@ -249,13 +249,15 @@ model Payment {
 }
 
 model Conversation {
-  id        String    @id @default(cuid())
-  userId    String
-  adminId   String?
-  status    String    @default("active")
-  rating    Int?
-  createdAt DateTime  @default(now())
-  closedAt  DateTime?
+  id          String    @id @default(cuid())
+  userId      String
+  adminId     String?
+  status      String    @default("active") // active | closed
+  rating      Int?
+  typingBy    String?   // user | admin | bot
+  typingUntil DateTime?
+  createdAt   DateTime  @default(now())
+  closedAt    DateTime?
 
   user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages Message[]

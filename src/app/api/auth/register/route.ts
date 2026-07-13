@@ -12,6 +12,10 @@ export async function POST(req: NextRequest) {
     if (!email || !password) {
       return NextResponse.json({ error: "Email and password are required" }, { status: 422 });
     }
+    const phoneDigits = String(phone || "").replace(/\D/g, "");
+    if (phoneDigits.length < 10) {
+      return NextResponse.json({ error: "Valid phone number is required (min 10 digits)" }, { status: 422 });
+    }
     const existing = await db.user.findUnique({ where: { email } });
     if (existing) {
       return NextResponse.json({ error: "Email already registered" }, { status: 409 });
@@ -21,7 +25,7 @@ export async function POST(req: NextRequest) {
       data: {
         email,
         name: name || null,
-        phone: phone || null,
+        phone: phoneDigits,
         city: city || null,
         passwordHash: hash,
         role: "customer",
