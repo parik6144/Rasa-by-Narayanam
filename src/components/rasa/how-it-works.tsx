@@ -1,10 +1,11 @@
 "use client";
+import { SITE_IMAGES } from "@/lib/site-images";
 import { ArrowRight } from "lucide-react";
 
 const STEPS = [
-  { num: "i.", title: "Enquiry", body: "Share your date, headcount and occasion. Build a menu here or just tell us your vision." },
-  { num: "ii.", title: "Menu Finalisation", body: "We refine your courses together and confirm a transparent, per-guest quotation." },
-  { num: "iii.", title: "Event Execution", body: "Our team sets up, serves gracefully and clears — you simply enjoy the celebration." },
+  { num: "i.", title: "Enquiry", body: "Share your date, headcount and occasion. Build a menu here or just tell us your vision.", img: SITE_IMAGES.contactSetup },
+  { num: "ii.", title: "Menu Finalisation", body: "We refine your courses together and confirm a transparent, per-guest quotation.", img: SITE_IMAGES.promiseChef },
+  { num: "iii.", title: "Event Execution", body: "Our team sets up, serves gracefully and clears — you simply enjoy the celebration.", img: SITE_IMAGES.howService },
 ];
 
 export default function HowItWorks() {
@@ -18,17 +19,26 @@ export default function HowItWorks() {
             Three simple steps — we keep it clear and unhurried, so your celebration is the only thing you think about.
           </p>
         </div>
-        <div className="grid md:grid-cols-3 gap-8 relative">
-          {/* Connecting line */}
-          <div className="hidden md:block absolute top-[60px] left-[15%] right-[15%] h-[1px]" style={{ background: "linear-gradient(90deg, transparent, var(--gold), transparent)" }} />
+        <div className="grid md:grid-cols-3 gap-7 relative">
+          <div className="hidden md:block absolute top-[88px] left-[15%] right-[15%] h-[1px]" style={{ background: "linear-gradient(90deg, transparent, var(--gold), transparent)" }} />
           {STEPS.map((s, i) => (
             <div key={i} className="text-center relative">
-              <div className="w-[120px] h-[120px] mx-auto rounded-full flex items-center justify-center mb-5 relative z-10" style={{
-                background: "linear-gradient(135deg, #F6EFE0, #EEE3CF)",
-                border: "2px solid var(--gold)",
-                boxShadow: "0 10px 30px -10px rgba(198,152,58,0.4), inset 0 1px 0 rgba(255,255,255,0.5)",
-              }}>
-                <span className="font-display italic text-[2.4rem]" style={{ color: "var(--gold)" }}>{s.num}</span>
+              <div
+                className="relative mx-auto mb-5 rounded-full overflow-hidden z-10"
+                style={{
+                  width: 168,
+                  height: 168,
+                  border: "2px solid var(--gold)",
+                  boxShadow: "0 10px 30px -10px rgba(198,152,58,0.4)",
+                }}
+              >
+                <img src={s.img} alt={s.title} className="w-full h-full object-cover" loading="lazy" />
+                <div
+                  className="absolute inset-0 flex items-center justify-center"
+                  style={{ background: "rgba(34,20,33,.42)" }}
+                >
+                  <span className="font-display italic text-[2.2rem]" style={{ color: "var(--gold-bright)" }}>{s.num}</span>
+                </div>
               </div>
               <h4 className="font-display text-[1.4rem] mb-2" style={{ color: "#2c1a26" }}>{s.title}</h4>
               <p className="text-[0.95rem] font-light max-w-[280px] mx-auto" style={{ color: "var(--on-ivory-dim)" }}>{s.body}</p>

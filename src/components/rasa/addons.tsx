@@ -3,6 +3,7 @@ import { useState, useMemo } from "react";
 import { useCatalog } from "@/store/catalog-store";
 import type { Addon } from "@/lib/rasa-data";
 import { useApp } from "@/store/app-store";
+import { addonCategoryImage } from "@/lib/site-images";
 import { ArrowRight } from "lucide-react";
 
 export default function Addons() {
@@ -65,7 +66,7 @@ export default function Addons() {
         </div>
 
         {!search && (
-          <div className="flex flex-wrap gap-2 mb-10">
+          <div className="flex flex-wrap gap-2 mb-6">
             {categories.map((c) => {
               const catNonVeg = c.toLowerCase().includes("mansahari");
               const count = addons.filter((a) => a.category === c).length;
@@ -85,6 +86,26 @@ export default function Addons() {
                 </button>
               );
             })}
+          </div>
+        )}
+
+        {!search && activeCat && (
+          <div className="relative rounded-lg overflow-hidden mb-8" style={{ border: "1px solid var(--paper-line)", height: 160 }}>
+            <img
+              src={addonCategoryImage(activeCat)}
+              alt={activeCat}
+              className="w-full h-full object-cover"
+              loading="lazy"
+            />
+            <div
+              className="absolute inset-0 flex items-end"
+              style={{ background: "linear-gradient(180deg, transparent 20%, rgba(26,15,25,.82) 100%)" }}
+            >
+              <div className="p-5">
+                <div className="text-[0.68rem] tracking-[0.22em] uppercase mb-1" style={{ color: "var(--gold-bright)" }}>Now browsing</div>
+                <div className="font-display text-[1.35rem]" style={{ color: "var(--ivory)" }}>{activeCat}</div>
+              </div>
+            </div>
           </div>
         )}
 

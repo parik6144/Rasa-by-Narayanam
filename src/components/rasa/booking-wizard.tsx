@@ -7,6 +7,7 @@ import { parseSelection, isSectionComplete } from "@/lib/selection";
 import {
   nextStepHint, pickInspireAddons, temptForAddon, fmtShortDate, editCutoffDate,
 } from "@/lib/booking-journey";
+import { packageImage } from "@/lib/site-images";
 import {
   ArrowLeft, ArrowRight, Check, Plus, Minus, Sparkles, Share2,
   Calendar, MapPin, Users, FileText, CheckCircle, AlertCircle, Info, Flame, Compass,
@@ -259,23 +260,31 @@ export default function BookingWizard() {
 
   const stepIndex = STEP_META.findIndex((s) => s.id === bookingStep);
 
+  const pkgHero = packageImage(pkg.id);
+
   return (
     <div className="min-h-screen flex flex-col" style={{ background: "linear-gradient(180deg,#F6EFE0 0%,#EEE3CF 40%,#E8DCC4 100%)", color: "#2c1a26" }}>
       {/* Top bar */}
       <header className="sticky top-0 z-40 border-b" style={{ background: "linear-gradient(180deg,#2f1e2f,#221421)", borderColor: "rgba(198,152,58,.25)" }}>
-        <div className="max-w-[1100px] mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-4">
-          <button onClick={() => { if (isEditing) { clearEditingBooking(); setView("user-dashboard"); } else closeBooking(); }} className="flex items-center gap-2 text-sm font-medium" style={{ color: "rgba(246,239,224,.72)" }}>
-            <ArrowLeft className="w-4 h-4" /> {isEditing ? "My bookings" : "Packages"}
-          </button>
-          <div className="text-center flex-1 min-w-0">
-            <div className="font-display text-[1.15rem] sm:text-[1.35rem] truncate" style={{ color: "var(--ivory)" }}>{pkg.name}</div>
-            <div className="text-[0.72rem]" style={{ color: "var(--gold-bright)" }}>
-              {isEditing ? `Editing ${editingBookingRef || "booking"} · ₹${pkg.price}/guest` : `₹${pkg.price}/guest · Shape your celebration`}
-            </div>
+        <div className="relative overflow-hidden">
+          <div className="absolute inset-0">
+            <img src={pkgHero} alt="" className="w-full h-full object-cover opacity-40" />
+            <div className="absolute inset-0" style={{ background: "linear-gradient(180deg, rgba(34,20,33,.55), rgba(34,20,33,.92))" }} />
           </div>
-          <div className="text-right hidden sm:block">
-            <div className="text-[0.66rem] uppercase tracking-wider" style={{ color: "rgba(246,239,224,.5)" }}>Estimate</div>
-            <div className="font-display text-[1.2rem]" style={{ color: "var(--gold-bright)" }}>₹{total.toLocaleString("en-IN")}</div>
+          <div className="relative max-w-[1100px] mx-auto px-4 sm:px-6 py-4 flex items-center justify-between gap-4">
+            <button onClick={() => { if (isEditing) { clearEditingBooking(); setView("user-dashboard"); } else closeBooking(); }} className="flex items-center gap-2 text-sm font-medium" style={{ color: "rgba(246,239,224,.72)" }}>
+              <ArrowLeft className="w-4 h-4" /> {isEditing ? "My bookings" : "Packages"}
+            </button>
+            <div className="text-center flex-1 min-w-0">
+              <div className="font-display text-[1.15rem] sm:text-[1.35rem] truncate" style={{ color: "var(--ivory)" }}>{pkg.name}</div>
+              <div className="text-[0.72rem]" style={{ color: "var(--gold-bright)" }}>
+                {isEditing ? `Editing ${editingBookingRef || "booking"} · ₹${pkg.price}/guest` : `₹${pkg.price}/guest · Shape your celebration`}
+              </div>
+            </div>
+            <div className="text-right hidden sm:block">
+              <div className="text-[0.66rem] uppercase tracking-wider" style={{ color: "rgba(246,239,224,.5)" }}>Estimate</div>
+              <div className="font-display text-[1.2rem]" style={{ color: "var(--gold-bright)" }}>₹{total.toLocaleString("en-IN")}</div>
+            </div>
           </div>
         </div>
 

@@ -1,4 +1,5 @@
 "use client";
+import { SITE_IMAGES } from "@/lib/site-images";
 
 const WHY_POINTS = [
   { title: "No middlemen, no venue commission", body: "We work direct with you — nothing is quietly added on top." },
@@ -11,13 +12,31 @@ export default function WhyRasa() {
   return (
     <section className="py-[104px]" id="why">
       <div className="max-w-[1220px] mx-auto px-5 sm:px-7">
-        <div className="mb-14 max-w-[720px]">
+        <div className="mb-10 max-w-[720px]">
           <div className="text-[0.72rem] font-semibold tracking-[0.32em] uppercase mb-2" style={{ color: "var(--gold)" }}>Honest Pricing</div>
           <h2 className="font-display mb-4" style={{ fontSize: "clamp(2.1rem,4.4vw,3.5rem)", color: "var(--ivory)" }}>Why Rasa costs less.</h2>
           <p className="text-[1.06rem] font-light" style={{ color: "rgba(246,239,224,.62)" }}>
             Not by cutting corners on food — but by cutting everything that was never about the food. The savings come from removing unnecessary frills, never from compromising on the quality, freshness or craft of what reaches your plate.
           </p>
         </div>
+
+        <div className="relative rounded-lg overflow-hidden mb-10" style={{ border: "1px solid var(--paper-line)", aspectRatio: "21/8", minHeight: 180 }}>
+          <img
+            src={SITE_IMAGES.whyKitchen}
+            alt="Central hygienic kitchen — where Rasa keeps quality high and cost honest"
+            className="w-full h-full object-cover"
+            loading="lazy"
+          />
+          <div
+            className="absolute inset-0 flex items-end"
+            style={{ background: "linear-gradient(90deg, rgba(26,15,25,.85) 0%, rgba(26,15,25,.35) 55%, transparent 100%), linear-gradient(180deg, transparent 40%, rgba(26,15,25,.7) 100%)" }}
+          >
+            <p className="p-5 sm:p-7 max-w-[420px] font-display italic text-[clamp(1.15rem,2.4vw,1.55rem)]" style={{ color: "var(--ivory)" }}>
+              One kitchen. Direct to your celebration.
+            </p>
+          </div>
+        </div>
+
         <div className="grid md:grid-cols-2 lg:grid-cols-4 gap-[22px]">
           {WHY_POINTS.map((p, i) => (
             <div key={i} className="glossy-card rounded-lg p-7">

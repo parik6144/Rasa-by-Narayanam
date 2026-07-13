@@ -3,7 +3,7 @@ import { CONFIG, TASTE_DOTS } from "@/lib/rasa-data";
 import { Phone, MessageCircle, Mail, Instagram, Globe } from "lucide-react";
 
 export default function Footer() {
-  const waUrl = `https://api.whatsapp.com/send/?phone=${CONFIG.whatsapp}&text&type=phone_number&app_absent=0`;
+  const waUrl = `https://wa.me/${CONFIG.whatsapp}`;
   const iconStyle = "w-9 h-9 rounded-full flex items-center justify-center transition-all hover:scale-110";
 
   return (

@@ -7,6 +7,7 @@ const REVIEWS = [
   { rating: 5, text: "We booked for a corporate evening — professional, punctual, and the mithai studio was the highlight of the night. Will book again.", name: "Meghdoot Industries", event: "Corporate event · Bokaro" },
 ];
 
+/** Original Rasa gallery — keep these under Kind Words */
 const GALLERY = [
   { src: "/gallery-0.jpg", alt: "Live Chaat Counter — Rasa by Narayanam", label: "Live Chaat Counter" },
   { src: "/gallery-1.jpg", alt: "The Royal Thali — Rasa by Narayanam", label: "The Royal Thali" },
