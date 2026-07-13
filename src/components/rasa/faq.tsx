@@ -1,6 +1,7 @@
 "use client";
 import { useState } from "react";
 import { Plus } from "lucide-react";
+import { CONFIG } from "@/lib/rasa-data";
 
 const FAQS = [
   { q: "How does the booking process work?", a: "Send an enquiry with date, guests and occasion — or build a menu here and share on WhatsApp. We confirm a clear per-guest quote; our team handles setup and service." },
@@ -8,7 +9,7 @@ const FAQS = [
   { q: "How much advance payment is required?", a: "25% at booking, 50% one week before the event, and the balance so 100% is cleared before event day." },
   { q: "What is the cancellation policy?", a: "After confirmation the guest count can’t be reduced. For cancellations or date changes, contact us early — terms are confirmed at booking." },
   { q: "Which areas do you serve?", a: "Jharkhand, Bengal, Chhattisgarh and Odisha — centred on Jamshedpur and about 200km around." },
-  { q: "Can the menu be customised?", a: "Yes. Pick dishes course by course, add custom dishes for chef review, and edit until 15 days before the event." },
+  { q: "Can the menu be customised?", a: `Yes. Pick dishes course by course, add custom dishes for chef review, and edit until ${CONFIG.editWindowDays} days before the event.` },
 ];
 
 export default function FAQ() {

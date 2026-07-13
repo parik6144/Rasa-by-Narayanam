@@ -344,7 +344,7 @@ function BookingCard({ b, fmtDate, fmtMoney, statusColor, expanded, onToggle, on
           </div>
           <div className="flex gap-1 mt-2 justify-end flex-wrap">
             <button onClick={() => window.open(`/api/quotation-pdf?bookingId=${b.id}`, "_blank")} className="glossy-btn-gold px-2 py-1 rounded text-[0.66rem] font-semibold">
-              PDF
+              Quotation PDF
             </button>
             {canEdit && (
               <button onClick={onEdit} className="glossy-btn-ghost px-2 py-1 rounded text-[0.66rem] font-semibold inline-flex items-center gap-1">

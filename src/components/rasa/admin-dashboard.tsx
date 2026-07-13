@@ -369,7 +369,7 @@ export default function AdminDashboard() {
                         <div className="text-xs" style={{ color: "rgba(246,239,224,.62)" }}>Paid {fmtMoney(b.advancePaid)} · Balance {fmtMoney(b.balance)}</div>
                         <div className="flex gap-1 mt-2 justify-end">
                           <button onClick={() => window.open(`/api/quotation-pdf?bookingId=${b.id}`, "_blank")} className="glossy-btn-gold px-2 py-1 rounded text-[0.66rem] font-semibold">
-                            PDF
+                            Quotation PDF
                           </button>
                           <a href={`https://wa.me/${CONFIG.bossWhatsApp}?text=${encodeURIComponent(`Booking ${b.bookingRef} - ${b.user?.name || b.user?.email} - ${fmtMoney(b.total)}`)}`} target="_blank" rel="noopener" className="glossy-btn-wa px-2 py-1 rounded text-[0.66rem] font-semibold">
                             WA

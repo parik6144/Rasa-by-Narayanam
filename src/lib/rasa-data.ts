@@ -3902,7 +3902,7 @@ export const CONFIG = {
   "eventBaseGuests": 500,
   "advancePercent": 25,
   "gstPercent": 5,
-  "editWindowDays": 15,
+  "editWindowDays": 2,
   "logo": "/rasa-logo.png",
   "bossWhatsApp": "919119777199",
   "bossPhoneDisplay": "+91 91197 77199",

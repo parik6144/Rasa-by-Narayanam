@@ -279,7 +279,7 @@ export default function QuotationPanel() {
 
             <div className="grid grid-cols-2 gap-3 mb-3">
               <button onClick={generatePDF} className="glossy-btn-gold py-3 rounded-md font-semibold flex items-center justify-center gap-2 text-[0.86rem]">
-                <FileText className="w-4 h-4" /> Download PDF
+                <FileText className="w-4 h-4" /> Download Quotation PDF
               </button>
               <button onClick={shareWhatsApp} className="glossy-btn-wa py-3 rounded-md font-semibold flex items-center justify-center gap-2 text-[0.86rem]">
                 <Share2 className="w-4 h-4" /> Share to WhatsApp
@@ -287,7 +287,7 @@ export default function QuotationPanel() {
             </div>
 
             <div className="text-[0.74rem] mb-4" style={{ color: "var(--on-ivory-dim)" }}>
-              📞 You can edit this booking (add-ons, custom dishes) until <b>15 days before</b> the event.
+              📞 You can edit this booking (add-ons, custom dishes) until <b>{CONFIG.editWindowDays} days before</b> the event.
             </div>
 
             <div className="grid grid-cols-2 gap-3">

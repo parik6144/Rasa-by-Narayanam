@@ -925,7 +925,7 @@ export default function BookingWizard() {
 
             <div className="grid grid-cols-2 gap-3 mb-4">
               <button onClick={() => window.open(`/api/quotation-pdf?bookingId=${bookingId}`, "_blank")} className="glossy-btn-gold py-3 rounded-lg font-semibold flex items-center justify-center gap-2 text-sm">
-                <FileText className="w-4 h-4" /> PDF
+                <FileText className="w-4 h-4" /> Download Quotation PDF
               </button>
               <button
                 onClick={async () => {
