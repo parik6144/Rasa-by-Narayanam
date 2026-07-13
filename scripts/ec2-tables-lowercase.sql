@@ -1,0 +1,16 @@
+RENAME TABLE `User` TO `user`;
+RENAME TABLE `Package` TO `package`;
+RENAME TABLE `MenuSection` TO `menusection`;
+RENAME TABLE `Dish` TO `dish`;
+RENAME TABLE `SectionDish` TO `sectiondish`;
+RENAME TABLE `Addon` TO `addon`;
+RENAME TABLE `Quotation` TO `quotation`;
+RENAME TABLE `Booking` TO `booking`;
+RENAME TABLE `Lead` TO `lead`;
+RENAME TABLE `Notification` TO `notification`;
+RENAME TABLE `QuotationShare` TO `quotationshare`;
+RENAME TABLE `Payment` TO `payment`;
+RENAME TABLE `Conversation` TO `conversation`;
+RENAME TABLE `Message` TO `message`;
+RENAME TABLE `Review` TO `review`;
+SHOW TABLES;

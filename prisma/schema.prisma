@@ -1,5 +1,6 @@
 // Rasa by Narayanam — Prisma Schema
 // Full data model: users, packages, dishes, quotations, bookings, payments, chat, reviews
+// @@map uses lowercase table names (phpMyAdmin / Linux MySQL case-sensitive)
 
 generator client {
   provider = "prisma-client-js"
@@ -27,6 +28,8 @@ model User {
   reviews     Review[]
   conversations Conversation[]
   payments    Payment[]
+
+  @@map("user")
 }
 
 model Package {
@@ -46,6 +49,8 @@ model Package {
   menuSections MenuSection[]
   quotations   Quotation[]
   bookings     Booking[]
+
+  @@map("package")
 }
 
 model MenuSection {
@@ -64,6 +69,7 @@ model MenuSection {
   dishes  SectionDish[]
 
   @@index([packageId])
+  @@map("menusection")
 }
 
 model Dish {
@@ -75,6 +81,8 @@ model Dish {
   updatedAt DateTime @updatedAt
 
   sections SectionDish[]
+
+  @@map("dish")
 }
 
 model SectionDish {
@@ -89,6 +97,7 @@ model SectionDish {
   @@unique([sectionId, dishId])
   @@index([sectionId])
   @@index([dishId])
+  @@map("sectiondish")
 }
 
 model Addon {
@@ -105,6 +114,8 @@ model Addon {
   displayOrder Int      @default(0)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @default(now()) @updatedAt
+
+  @@map("addon")
 }
 
 model Quotation {
@@ -121,6 +132,8 @@ model Quotation {
 
   user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
   package Package? @relation(fields: [packageId], references: [id])
+
+  @@map("quotation")
 }
 
 model Booking {
@@ -153,6 +166,8 @@ model Booking {
   package Package? @relation(fields: [packageId], references: [id])
   payments Payment[]
   reviews  Review[]
+
+  @@map("booking")
 }
 
 model Lead {
@@ -181,6 +196,7 @@ model Lead {
 
   @@index([followUpAt])
   @@index([status])
+  @@map("lead")
 }
 
 model Notification {
@@ -196,6 +212,7 @@ model Notification {
 
   @@index([userId, readAt])
   @@index([userId, createdAt])
+  @@map("notification")
 }
 
 model QuotationShare {
@@ -210,6 +227,8 @@ model QuotationShare {
   expiresAt    DateTime
   viewedAt     DateTime?
   createdAt    DateTime  @default(now())
+
+  @@map("quotationshare")
 }
 
 model Payment {
@@ -225,6 +244,8 @@ model Payment {
 
   booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   user    User    @relation(fields: [userId], references: [id])
+
+  @@map("payment")
 }
 
 model Conversation {
@@ -238,6 +259,8 @@ model Conversation {
 
   user     User      @relation(fields: [userId], references: [id], onDelete: Cascade)
   messages Message[]
+
+  @@map("conversation")
 }
 
 model Message {
@@ -251,6 +274,8 @@ model Message {
   createdAt      DateTime  @default(now())
 
   conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+
+  @@map("message")
 }
 
 model Review {
@@ -267,4 +292,6 @@ model Review {
 
   booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   user    User    @relation(fields: [userId], references: [id])
+
+  @@map("review")
 }
