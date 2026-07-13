@@ -1,7 +1,46 @@
-// Chat: list conversations + messages
+// Chat: list conversations + messages (logged-in or guest via name/email)
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { getCurrentUser } from "@/lib/auth";
+import {
+  getCurrentUser,
+  createSessionToken,
+  setSessionCookie,
+  setSessionCookieStore,
+  hashPassword,
+} from "@/lib/auth";
+
+function guestEmailFromContact(contact: string): string {
+  const trimmed = contact.trim();
+  if (trimmed.includes("@")) return trimmed.toLowerCase();
+  const digits = trimmed.replace(/\D/g, "");
+  return `guest-${digits || Date.now()}@rasa.local`;
+}
+
+async function ensureGuestUser(name: string, contact: string) {
+  const email = guestEmailFromContact(contact);
+  const phone = contact.includes("@") ? null : contact.replace(/\D/g, "") || null;
+  let user = await db.user.findUnique({ where: { email } });
+  if (!user && phone) {
+    user = await db.user.findFirst({ where: { phone } });
+  }
+  if (!user) {
+    user = await db.user.create({
+      data: {
+        email,
+        name: name.trim() || "Guest",
+        phone,
+        role: "customer",
+        passwordHash: await hashPassword(`guest-${email}-${Date.now()}`),
+      },
+    });
+  } else if (name.trim() && !user.name) {
+    user = await db.user.update({
+      where: { id: user.id },
+      data: { name: name.trim() },
+    });
+  }
+  return user;
+}
 
 export async function GET(req: NextRequest) {
   const user = await getCurrentUser();
@@ -32,11 +71,40 @@ export async function GET(req: NextRequest) {
 }
 
 export async function POST(req: NextRequest) {
-  const user = await getCurrentUser();
-  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
   const body = await req.json();
-  const { conversationId, text } = body as { conversationId?: string; text?: string };
+  const { conversationId, text, guestName, guestEmail } = body as {
+    conversationId?: string;
+    text?: string;
+    guestName?: string;
+    guestEmail?: string;
+  };
   if (!text) return NextResponse.json({ error: "Missing text" }, { status: 422 });
+
+  let user = await getCurrentUser();
+  let setCookieToken: string | null = null;
+
+  // Guest start: create/find customer and issue session so chat continues
+  if (!user && guestName && guestEmail) {
+    const guest = await ensureGuestUser(guestName, guestEmail);
+    user = {
+      id: guest.id,
+      email: guest.email,
+      name: guest.name,
+      phone: guest.phone,
+      role: guest.role,
+      city: guest.city,
+      dietaryPrefs: guest.dietaryPrefs,
+    };
+    setCookieToken = await createSessionToken({
+      userId: guest.id,
+      email: guest.email,
+      role: guest.role,
+      name: guest.name || undefined,
+    });
+    await setSessionCookieStore(setCookieToken);
+  }
+
+  if (!user) return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
 
   let convId = conversationId;
   if (!convId) {
@@ -77,5 +145,7 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  return NextResponse.json({ message: msg, conversationId: convId });
+  const res = NextResponse.json({ message: msg, conversationId: convId });
+  if (setCookieToken) setSessionCookie(res, setCookieToken);
+  return res;
 }

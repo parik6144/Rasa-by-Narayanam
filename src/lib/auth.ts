@@ -8,6 +8,13 @@ import { db } from "@/lib/db";
 const SESSION_COOKIE = "rasa_session";
 const SECRET = new TextEncoder().encode(process.env.SESSION_SECRET || "rasa-secret-change-in-prod-please-32bytes!");
 
+/** Secure cookies break login on plain HTTP (e.g. EC2 IP). Set COOKIE_SECURE=true behind HTTPS. */
+function cookieSecure(): boolean {
+  if (process.env.COOKIE_SECURE === "true") return true;
+  if (process.env.COOKIE_SECURE === "false") return false;
+  return process.env.NODE_ENV === "production";
+}
+
 export async function hashPassword(pw: string): Promise<string> {
   return bcrypt.hash(pw, 10);
 }
@@ -35,7 +42,7 @@ export function setSessionCookie(response: NextResponse, token: string): void {
   const opts = {
     httpOnly: true,
     sameSite: "lax" as const,
-    secure: process.env.NODE_ENV === "production",
+    secure: cookieSecure(),
     maxAge: 60 * 60 * 24 * 30, // 30 days
     path: "/",
   };
@@ -48,7 +55,7 @@ export async function setSessionCookieStore(token: string): Promise<void> {
     store.set(SESSION_COOKIE, token, {
       httpOnly: true,
       sameSite: "lax",
-      secure: process.env.NODE_ENV === "production",
+      secure: cookieSecure(),
       maxAge: 60 * 60 * 24 * 30,
       path: "/",
     });
@@ -61,7 +68,7 @@ export function clearSessionCookie(response: NextResponse): void {
   response.cookies.set(SESSION_COOKIE, "", {
     httpOnly: true,
     sameSite: "lax",
-    secure: process.env.NODE_ENV === "production",
+    secure: cookieSecure(),
     maxAge: 0,
     path: "/",
   });

@@ -17,7 +17,7 @@ export default function ChatWidget() {
   useEffect(() => {
     if (!chatWidgetOpen || !conversationId) return;
     const i = setInterval(() => {
-      fetch(`/api/chat?conversationId=${conversationId}`).then((r) => r.json()).then((d) => {
+      fetch(`/api/chat?conversationId=${conversationId}`, { credentials: "include" }).then((r) => r.json()).then((d) => {
         setMessages(d.messages || []);
       }).catch(() => {});
     }, 3000);
@@ -25,17 +25,34 @@ export default function ChatWidget() {
   }, [chatWidgetOpen, conversationId]);
 
   const startConversation = async () => {
-    if (!user && !guestName) return;
+    if (!user && (!guestName.trim() || !guestEmail.trim())) return;
     setLoading(true);
-    const res = await fetch("/api/chat", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ text: user ? `Hi, I'm ${user.name || user.email}.` : `Hi, I'm ${guestName} (${guestEmail}).` }),
-    });
-    const d = await res.json();
-    setConversationId(d.conversationId);
-    setMessages([{ id: "bot-welcome", senderType: "bot", text: "Welcome to Rasa! How can we help you today? Ask about packages, pricing, dietary options, or booking.", createdAt: new Date().toISOString() }]);
-    setLoading(false);
+    try {
+      const res = await fetch("/api/chat", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        credentials: "include",
+        body: JSON.stringify({
+          text: user ? `Hi, I'm ${user.name || user.email}.` : `Hi, I'm ${guestName.trim()} (${guestEmail.trim()}).`,
+          ...(!user ? { guestName: guestName.trim(), guestEmail: guestEmail.trim() } : {}),
+        }),
+      });
+      const d = await res.json();
+      if (!res.ok) {
+        setMessages([{ id: "err", senderType: "bot", text: d.error || "Could not start chat. Please try again.", createdAt: new Date().toISOString() }]);
+        return;
+      }
+      setConversationId(d.conversationId);
+      const refresh = await fetch(`/api/chat?conversationId=${d.conversationId}`, { credentials: "include" }).then((r) => r.json());
+      const loaded = refresh.messages || [];
+      setMessages(
+        loaded.length
+          ? loaded
+          : [{ id: "bot-welcome", senderType: "bot", text: "Welcome to Rasa! How can we help you today? Ask about packages, pricing, dietary options, or booking.", createdAt: new Date().toISOString() }]
+      );
+    } finally {
+      setLoading(false);
+    }
   };
 
   const send = async () => {
@@ -46,10 +63,15 @@ export default function ChatWidget() {
     const res = await fetch("/api/chat", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
+      credentials: "include",
       body: JSON.stringify({ conversationId, text: msg }),
     });
     const d = await res.json();
-    const refresh = await fetch(`/api/chat?conversationId=${d.conversationId || conversationId}`).then((r) => r.json());
+    if (!res.ok) {
+      setMessages((prev) => [...prev, { id: "err-" + Date.now(), senderType: "bot", text: d.error || "Message failed. Please refresh and try again.", createdAt: new Date().toISOString() }]);
+      return;
+    }
+    const refresh = await fetch(`/api/chat?conversationId=${d.conversationId || conversationId}`, { credentials: "include" }).then((r) => r.json());
     setMessages(refresh.messages || []);
     if (!conversationId) setConversationId(d.conversationId);
   };
