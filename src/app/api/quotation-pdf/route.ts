@@ -7,10 +7,10 @@ import { CONFIG } from "@/lib/rasa-data";
 import { buildQuotationHTML, type QuotationAddonLine } from "@/lib/quotation-pdf-html";
 
 async function resolveLogoDataUri(origin: string): Promise<string> {
-  const logoPath = CONFIG.logo.startsWith("/") ? CONFIG.logo : `/${CONFIG.logo}`;
+  const relative = (CONFIG.logo.startsWith("/") ? CONFIG.logo : `/${CONFIG.logo}`).replace(/^\//, "");
   const candidates = [
-    path.join(process.cwd(), "public", logoPath.replace(/^\//, "")),
-    path.join(process.cwd(), "..", "public", logoPath.replace(/^\//, "")),
+    path.join(/*turbopackIgnore: true*/ process.cwd(), "public", relative),
+    path.join(/*turbopackIgnore: true*/ process.cwd(), "..", "public", relative),
   ];
   for (const file of candidates) {
     try {
@@ -27,7 +27,7 @@ async function resolveLogoDataUri(origin: string): Promise<string> {
       /* try next */
     }
   }
-  return `${origin}${logoPath}`;
+  return `${origin}/${relative}`;
 }
 
 function paiseToRupees(n: number | null | undefined): number {
