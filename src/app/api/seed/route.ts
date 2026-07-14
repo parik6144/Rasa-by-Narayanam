@@ -9,21 +9,34 @@ const FEATURED_SLUG = "rasa-utsav-799";
 
 export async function POST() {
   try {
-    // 1. Admin
-    const adminEmail = "admin@rasakitchen.co";
-    const existing = await db.user.findUnique({ where: { email: adminEmail } });
-    if (!existing) {
-      const hash = await hashPassword("admin123");
-      await db.user.create({
-        data: {
-          email: adminEmail,
-          name: "Devendra Purohit",
-          phone: "7545800800",
-          city: "Jamshedpur",
-          passwordHash: hash,
-          role: "admin",
-        },
-      });
+    // 1. Staff accounts (admin / manager / sales)
+    const staffSeed = [
+      { email: "admin@rasakitchen.co", name: "Devendra Purohit", phone: "7545800800", role: "admin", password: "admin123" },
+      { email: "manager@rasakitchen.co", name: "Kitchen Manager", phone: "7545800801", role: "manager", password: "manager123" },
+      { email: "sales@rasakitchen.co", name: "Sales Executive", phone: "7545800802", role: "sales", password: "sales123" },
+    ] as const;
+
+    for (const s of staffSeed) {
+      const existing = await db.user.findUnique({ where: { email: s.email } });
+      if (!existing) {
+        const hash = await hashPassword(s.password);
+        await db.user.create({
+          data: {
+            email: s.email,
+            name: s.name,
+            phone: s.phone,
+            city: "Jamshedpur",
+            passwordHash: hash,
+            role: s.role,
+            isActive: true,
+          },
+        });
+      } else if (existing.role !== s.role || existing.isActive === false) {
+        await db.user.update({
+          where: { email: s.email },
+          data: { role: s.role, isActive: true, name: existing.name || s.name },
+        });
+      }
     }
 
     // 2. Global dish map (dedupe by name)
@@ -142,6 +155,7 @@ export async function POST() {
           category: a.category,
           isNv: !!a.nv,
           isActive: true,
+          guestRange: a.guestRange || 0,
           displayOrder: i,
           choices: a.choices?.length ? JSON.stringify(a.choices) : null,
         },
@@ -155,6 +169,7 @@ export async function POST() {
           isActive: true,
           displayOrder: i,
           choices: a.choices?.length ? JSON.stringify(a.choices) : null,
+          // guestRange left unchanged so admin edits are preserved on re-seed
         },
       });
       addonsUpserted++;
@@ -169,7 +184,13 @@ export async function POST() {
 
     return NextResponse.json({
       ok: true,
-      message: "Catalog seeded into dynamic tables. Admin: admin@rasakitchen.co / admin123",
+      message:
+        "Catalog seeded. Staff: admin@rasakitchen.co / admin123 · manager@rasakitchen.co / manager123 · sales@rasakitchen.co / sales123",
+      staff: [
+        { role: "admin", email: "admin@rasakitchen.co", password: "admin123" },
+        { role: "manager", email: "manager@rasakitchen.co", password: "manager123" },
+        { role: "sales", email: "sales@rasakitchen.co", password: "sales123" },
+      ],
       stats: {
         packagesUpserted,
         addonsUpserted,

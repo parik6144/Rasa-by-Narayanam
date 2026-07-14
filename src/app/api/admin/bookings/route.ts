@@ -1,17 +1,23 @@
 // Admin: all bookings
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth";
+import { requirePermission, requireStaff } from "@/lib/auth";
+import { authErrorResponse } from "@/lib/api-auth";
 
 export async function GET() {
   try {
-    await requireAdmin();
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    await requireStaff();
+  } catch (e) {
+    const { status, body } = authErrorResponse(e);
+    return NextResponse.json(body, { status });
   }
   const bookings = await db.booking.findMany({
     orderBy: { createdAt: "desc" },
-    include: { user: true, package: true, payments: true },
+    include: {
+      user: true,
+      package: true,
+      payments: { orderBy: { createdAt: "desc" } },
+    },
     take: 100,
   });
   return NextResponse.json({ bookings });
@@ -20,9 +26,10 @@ export async function GET() {
 // Update booking status
 export async function PATCH(req: Request) {
   try {
-    await requireAdmin();
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    await requirePermission("bookings.write");
+  } catch (e) {
+    const { status, body } = authErrorResponse(e);
+    return NextResponse.json(body, { status });
   }
   const body = await req.json();
   const { id, status } = body as { id?: string; status?: string };

@@ -1,14 +1,16 @@
 // Admin notifications — list, unread count, mark read
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth";
+import { requirePermission } from "@/lib/auth";
+import { authErrorResponse } from "@/lib/api-auth";
 
 export async function GET(req: Request) {
   let admin;
   try {
-    admin = await requireAdmin();
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    admin = await requirePermission("notifications.read");
+  } catch (e) {
+    const { status, body } = authErrorResponse(e);
+    return NextResponse.json(body, { status });
   }
 
   const { searchParams } = new URL(req.url);
@@ -35,9 +37,10 @@ export async function GET(req: Request) {
 export async function PATCH(req: Request) {
   let admin;
   try {
-    admin = await requireAdmin();
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    admin = await requirePermission("notifications.read");
+  } catch (e) {
+    const { status, body } = authErrorResponse(e);
+    return NextResponse.json(body, { status });
   }
 
   const body = await req.json();

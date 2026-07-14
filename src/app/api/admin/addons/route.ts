@@ -1,13 +1,15 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth";
+import { requirePermission } from "@/lib/auth";
+import { authErrorResponse } from "@/lib/api-auth";
 import { slugify } from "@/lib/selection";
 
 export async function GET() {
   try {
-    await requireAdmin();
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    await requirePermission("catalog.read");
+  } catch (e) {
+    const { status, body } = authErrorResponse(e);
+    return NextResponse.json(body, { status });
   }
 
   const addons = await db.addon.findMany({ orderBy: [{ category: "asc" }, { displayOrder: "asc" }] });
@@ -23,6 +25,7 @@ export async function GET() {
       isNv: a.isNv,
       isActive: a.isActive,
       displayOrder: a.displayOrder,
+      guestRange: a.guestRange || 0,
       choices: a.choices ? (JSON.parse(a.choices) as string[]) : [],
     })),
   });
@@ -30,9 +33,10 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    await requireAdmin();
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    await requirePermission("catalog.write");
+  } catch (e) {
+    const { status, body } = authErrorResponse(e);
+    return NextResponse.json(body, { status });
   }
 
   const body = await req.json();
@@ -65,6 +69,7 @@ export async function POST(req: Request) {
       category,
       isNv: !!body.isNv,
       isActive: body.isActive !== false,
+      guestRange: Math.max(0, Math.round(Number(body.guestRange) || 0)),
       displayOrder: (maxOrder._max.displayOrder ?? -1) + 1,
       choices: Array.isArray(body.choices) && body.choices.length
         ? JSON.stringify(body.choices.map(String))
@@ -77,9 +82,10 @@ export async function POST(req: Request) {
 
 export async function PATCH(req: Request) {
   try {
-    await requireAdmin();
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    await requirePermission("catalog.write");
+  } catch (e) {
+    const { status, body } = authErrorResponse(e);
+    return NextResponse.json(body, { status });
   }
 
   const body = await req.json();
@@ -95,6 +101,7 @@ export async function PATCH(req: Request) {
   if (body.isNv != null) data.isNv = !!body.isNv;
   if (body.isActive != null) data.isActive = !!body.isActive;
   if (body.displayOrder != null) data.displayOrder = Number(body.displayOrder);
+  if (body.guestRange != null) data.guestRange = Math.max(0, Math.round(Number(body.guestRange) || 0));
   if (Array.isArray(body.choices)) {
     data.choices = body.choices.length ? JSON.stringify(body.choices.map(String)) : null;
   }
@@ -105,9 +112,10 @@ export async function PATCH(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
-    await requireAdmin();
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    await requirePermission("catalog.write");
+  } catch (e) {
+    const { status, body } = authErrorResponse(e);
+    return NextResponse.json(body, { status });
   }
 
   const { searchParams } = new URL(req.url);

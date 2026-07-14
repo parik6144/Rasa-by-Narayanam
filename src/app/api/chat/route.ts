@@ -8,6 +8,7 @@ import {
   setSessionCookieStore,
   hashPassword,
 } from "@/lib/auth";
+import { isStaffRole } from "@/lib/permissions";
 
 function guestEmailFromContact(contact: string): string {
   const trimmed = contact.trim();
@@ -89,7 +90,7 @@ export async function GET(req: NextRequest) {
       where: { conversationId },
       orderBy: { createdAt: "asc" },
     });
-    const myType = user.role === "admin" ? "admin" : "user";
+    const myType = isStaffRole(user.role) ? "admin" : "user";
     const meta = await peerTypingFromDb(conversationId, myType);
     return NextResponse.json({
       messages,
@@ -99,7 +100,7 @@ export async function GET(req: NextRequest) {
     });
   }
 
-  const where = user.role === "admin" ? {} : { userId: user.id };
+  const where = isStaffRole(user.role) ? {} : { userId: user.id };
   const conversations = await db.conversation.findMany({
     where,
     orderBy: { createdAt: "desc" },
@@ -164,7 +165,7 @@ export async function POST(req: NextRequest) {
     }
   }
 
-  const senderType = user.role === "admin" ? "admin" : "user";
+  const senderType = isStaffRole(user.role) ? "admin" : "user";
 
   // Clear own typing flag in DB
   await db.conversation.update({
@@ -191,7 +192,7 @@ export async function POST(req: NextRequest) {
   });
 
   // Customer message → bot typing in DB, then delayed auto-reply
-  if (user.role !== "admin") {
+  if (!isStaffRole(user.role)) {
     await db.conversation.update({
       where: { id: convId },
       data: {
@@ -229,7 +230,7 @@ export async function POST(req: NextRequest) {
   const res = NextResponse.json({
     message: msg,
     conversationId: convId,
-    botPending: user.role !== "admin",
+    botPending: !isStaffRole(user.role),
   });
   if (setCookieToken) setSessionCookie(res, setCookieToken);
   return res;

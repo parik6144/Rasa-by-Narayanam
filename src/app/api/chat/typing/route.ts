@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+import { isStaffRole } from "@/lib/permissions";
 
 const TYPING_TTL_MS = 5000;
 
@@ -17,7 +18,7 @@ export async function GET(req: NextRequest) {
   });
   if (!conv) return NextResponse.json({ error: "Not found" }, { status: 404 });
 
-  const myRole = user.role === "admin" ? "admin" : "user";
+  const myRole = isStaffRole(user.role) ? "admin" : "user";
   const now = Date.now();
   const until = conv.typingUntil ? new Date(conv.typingUntil).getTime() : 0;
   const active = conv.typingBy && until > now && conv.typingBy !== myRole;
@@ -43,13 +44,13 @@ export async function POST(req: NextRequest) {
 
   // End / reopen session
   if (action === "close" || action === "reopen") {
-    if (user.role !== "admin" && action === "reopen") {
+    if (!isStaffRole(user.role) && action === "reopen") {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
-    // Admin can close; customer can also close their own chat
+    // Staff can close; customer can also close their own chat
     const conv = await db.conversation.findUnique({ where: { id: conversationId } });
     if (!conv) return NextResponse.json({ error: "Not found" }, { status: 404 });
-    if (user.role !== "admin" && conv.userId !== user.id) {
+    if (!isStaffRole(user.role) && conv.userId !== user.id) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
@@ -67,7 +68,7 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const senderType = user.role === "admin" ? "admin" : "user";
+  const senderType = isStaffRole(user.role) ? "admin" : "user";
   const conv = await db.conversation.findUnique({ where: { id: conversationId } });
   if (!conv) return NextResponse.json({ error: "Not found" }, { status: 404 });
   if (conv.status === "closed") {

@@ -3,6 +3,7 @@ import { useState } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/store/app-store";
 import { CONFIG } from "@/lib/rasa-data";
+import { isStaffRole } from "@/lib/permissions";
 import { ArrowLeft, Mail, Lock, Shield } from "lucide-react";
 
 export default function AdminLogin() {
@@ -26,14 +27,14 @@ export default function AdminLogin() {
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Login failed");
-      if (data.user.role !== "admin") {
-        setErr("This account is not an admin.");
+      if (!isStaffRole(data.user.role)) {
+        setErr("This account is not authorized for the staff console.");
         return;
       }
       // Keep session in store + sessionStorage — do NOT remount via router.replace
       setUser(data.user);
       setSessionChecked(true);
-      setToast("Admin logged in");
+      setToast("Logged in");
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "Login failed");
     } finally {

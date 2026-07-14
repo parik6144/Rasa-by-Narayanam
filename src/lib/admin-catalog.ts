@@ -1,6 +1,4 @@
-import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth";
 import { parseSelection, slugify } from "@/lib/selection";
 
 async function rebuildPackageSectionsCache(packageId: string) {

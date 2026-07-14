@@ -1,17 +1,20 @@
 // Admin: dashboard stats
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth";
+import { requireStaff } from "@/lib/auth";
+import { hasPermission } from "@/lib/permissions";
+import { authErrorResponse } from "@/lib/api-auth";
 
 export async function GET() {
+  let user;
   try {
-    await requireAdmin();
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    user = await requireStaff();
+  } catch (e) {
+    const { status, body } = authErrorResponse(e);
+    return NextResponse.json(body, { status });
   }
   const today = new Date();
   today.setHours(0, 0, 0, 0);
-  const last30 = new Date(); last30.setDate(last30.getDate() - 30);
 
   const [totalBookings, todayBookings, totalCustomers, totalRevenue, pendingPayments, activeEvents, recentBookings, recentCustomers] = await Promise.all([
     db.booking.count(),
@@ -24,13 +27,15 @@ export async function GET() {
     db.user.findMany({ take: 8, where: { role: "customer" }, orderBy: { createdAt: "desc" } }),
   ]);
 
+  const showFinance = hasPermission(user.role, "overview.finance");
+
   return NextResponse.json({
     kpis: {
       totalBookings,
       todayBookings,
       totalCustomers,
-      totalRevenue: totalRevenue._sum.amount || 0,
-      pendingPayments,
+      totalRevenue: showFinance ? (totalRevenue._sum.amount || 0) : null,
+      pendingPayments: showFinance ? pendingPayments : null,
       activeEvents,
     },
     recentBookings,

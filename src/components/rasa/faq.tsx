@@ -6,7 +6,8 @@ import { CONFIG } from "@/lib/rasa-data";
 const FAQS = [
   { q: "How does the booking process work?", a: "Send an enquiry with date, guests and occasion — or build a menu here and share on WhatsApp. We confirm a clear per-guest quote; our team handles setup and service." },
   { q: "Is there a minimum guest requirement?", a: "Yes — minimum 100 guests. Below that, billing is still at 100. Guaranteed count can’t be reduced once confirmed; we prepare for up to 105% of it." },
-  { q: "How much advance payment is required?", a: "25% at booking, 50% one week before the event, and the balance so 100% is cleared before event day." },
+  { q: "How much advance payment is required?", a: "Suggested 25% at booking, 50% closer to the event, and the balance before event day. You can pay anytime from My Bookings via Stripe (card) or by scanning our UPI QR in Paytm / Google Pay / PhonePe." },
+  { q: "How do I pay online?", a: "After booking, use Pay now in your account: Stripe for card payments, or scan the UPI QR and submit a claim with an optional screenshot. UPI claims are confirmed by our team." },
   { q: "What is the cancellation policy?", a: "After confirmation the guest count can’t be reduced. For cancellations or date changes, contact us early — terms are confirmed at booking." },
   { q: "Which areas do you serve?", a: "Jharkhand, Bengal, Chhattisgarh and Odisha — centred on Jamshedpur and about 200km around." },
   { q: "Can the menu be customised?", a: `Yes. Pick dishes course by course, add custom dishes for chef review, and edit until ${CONFIG.editWindowDays} days before the event.` },

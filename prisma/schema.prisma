@@ -17,7 +17,8 @@ model User {
   phone        String?  @unique
   name         String?
   passwordHash String?
-  role         String   @default("customer") // customer | admin
+  role         String   @default("customer") // customer | admin | manager | sales
+  isActive     Boolean  @default(true)
   city         String?
   dietaryPrefs String?  // JSON
   createdAt    DateTime @default(now())
@@ -111,6 +112,7 @@ model Addon {
   isNv         Boolean  @default(false)
   isActive     Boolean  @default(true)
   choices      String?  @db.Text // JSON
+  guestRange   Int      @default(0) // min billable guests for per_guest; 0 = use actual
   displayOrder Int      @default(0)
   createdAt    DateTime @default(now())
   updatedAt    DateTime @default(now()) @updatedAt
@@ -149,6 +151,7 @@ model Booking {
   subtotal     Int      @default(0)
   discount     Int      @default(0)
   discountNote String?
+  promoCodeId  String?
   gst          Int      @default(0)
   total        Int      @default(0)
   advancePaid  Int      @default(0)
@@ -162,12 +165,35 @@ model Booking {
   createdAt    DateTime @default(now())
   updatedAt    DateTime @updatedAt
 
-  user    User    @relation(fields: [userId], references: [id], onDelete: Cascade)
-  package Package? @relation(fields: [packageId], references: [id])
-  payments Payment[]
-  reviews  Review[]
+  user      User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  package   Package?   @relation(fields: [packageId], references: [id])
+  promoCode PromoCode? @relation(fields: [promoCodeId], references: [id], onDelete: SetNull)
+  payments  Payment[]
+  reviews   Review[]
 
   @@map("booking")
+}
+
+model PromoCode {
+  id               String    @id @default(cuid())
+  code             String    @unique // uppercase e.g. RASA10
+  label            String
+  type             String    // percent | fixed
+  value            Int       // percent 1-100 OR discount in paise for fixed
+  minOrderPaise    Int       @default(0)
+  maxDiscountPaise Int?      // cap for percent codes
+  startsAt         DateTime?
+  endsAt           DateTime?
+  usageLimit       Int?      // null = unlimited
+  usedCount        Int       @default(0)
+  isActive         Boolean   @default(true)
+  createdBy        String?
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  bookings Booking[]
+
+  @@map("promocode")
 }
 
 model Lead {
@@ -232,20 +258,37 @@ model QuotationShare {
 }
 
 model Payment {
-  id         String   @id @default(cuid())
-  bookingId  String
-  userId     String
-  amount     Int
-  method     String   @default("upi")
-  status     String   @default("success")
-  gateway    String   @default("mock")
-  gatewayTxn String?  @unique
-  createdAt  DateTime @default(now())
+  id          String    @id @default(cuid())
+  bookingId   String
+  userId      String
+  amount      Int // paise
+  method      String    @default("upi") // upi | card | stripe
+  status      String    @default("pending") // pending | success | failed | cancelled
+  gateway     String    @default("mock") // mock | stripe | upi_manual
+  gatewayTxn  String?   @unique
+  proofUrl    String?
+  note        String?   @db.Text
+  confirmedBy String?
+  confirmedAt DateTime?
+  createdAt   DateTime  @default(now())
 
   booking Booking @relation(fields: [bookingId], references: [id], onDelete: Cascade)
   user    User    @relation(fields: [userId], references: [id])
 
+  @@index([bookingId, status])
+  @@index([status, createdAt])
   @@map("payment")
+}
+
+/** Single-row site payment settings (id always "default"). */
+model SiteSettings {
+  id               String   @id @default("default")
+  upiId            String?
+  upiQrUrl         String?
+  paymentsEnabled  Boolean  @default(true)
+  updatedAt        DateTime @updatedAt
+
+  @@map("sitesettings")
 }
 
 model Conversation {

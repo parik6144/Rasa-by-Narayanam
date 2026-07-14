@@ -4,6 +4,7 @@ import { useApp } from "@/store/app-store";
 import { useCatalog } from "@/store/catalog-store";
 import { CONFIG } from "@/lib/rasa-data";
 import { parseSelection, isSectionComplete } from "@/lib/selection";
+import { addonLineTotal, addonMinGuestsBadge, addonPricingNote } from "@/lib/addon-pricing";
 import { X, Plus, Check, ArrowRight, ArrowLeft, Minus, Sparkles, Share2, Info } from "lucide-react";
 
 export default function MenuBuilder() {
@@ -83,9 +84,7 @@ export default function MenuBuilder() {
     const addonsTotal = selectedAddons.reduce((sum, id) => {
       const a = addons.find((x) => x.id === id);
       if (!a) return sum;
-      if (a.priceType === "per_guest") return sum + a.price * activeQuotation.guests;
-      if (a.priceType === "per_event") return sum + a.price;
-      return sum + a.price;
+      return sum + addonLineTotal(a, activeQuotation.guests);
     }, 0);
     const subtotal = pkgTotal + addonsTotal;
     const gst = Math.round(subtotal * 0.05);
@@ -328,6 +327,7 @@ export default function MenuBuilder() {
               <div className="mb-4 p-3 rounded-md" style={{ background: "rgba(198,152,58,.08)", border: "1px solid var(--paper-line)" }}>
                 <p className="text-[0.82rem]" style={{ color: "var(--on-ivory-dim)" }}>
                   <b style={{ color: "#2c1a26" }}>Add-ons are optional.</b> Live stations, regional thalis, mithai, frozen theatre, and mansahari — pick any on top of your package.
+                  {" "}Per-guest extras with a guest minimum are billed on <b style={{ color: "#2c1a26" }}>max({activeQuotation.guests} guests, that minimum)</b> in your quotation.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2 mb-4">
@@ -347,6 +347,8 @@ export default function MenuBuilder() {
               {visibleAddons.map((a) => {
                 const isSel = selectedAddons.includes(a.id);
                 const priceStr = a.priceType === "per_guest" ? `₹${a.price}/guest` : a.priceType === "per_event" ? `₹${a.price}/event` : `₹${a.price}`;
+                const badge = addonMinGuestsBadge(a);
+                const note = isSel ? addonPricingNote(a, activeQuotation.guests) : addonPricingNote(a);
                 return (
                   <div key={a.id} className="py-4 border-b" style={{ borderColor: "rgba(58,39,51,.14)" }}>
                     <button onClick={() => toggleAddon(a.id)} className="flex gap-3 items-start w-full text-left">
@@ -359,9 +361,13 @@ export default function MenuBuilder() {
                             {a.name}
                             {a.nv && <span className="ml-2 inline-block w-3 h-3 align-middle" style={{ border: "1.5px solid #c0392b", borderRadius: 2 }} />}
                           </div>
-                          <div className="text-[0.86rem] font-semibold whitespace-nowrap" style={{ color: "var(--anaar)" }}>{priceStr}</div>
+                          <div className="text-[0.86rem] font-semibold whitespace-nowrap text-right" style={{ color: "var(--anaar)" }}>
+                            {priceStr}
+                            {badge && <div className="text-[0.65rem] font-medium opacity-80">{badge}</div>}
+                          </div>
                         </div>
                         <div className="text-[0.88rem] font-light mt-1" style={{ color: "var(--on-ivory-dim)" }}>{a.description}</div>
+                        {note && <div className="text-[0.72rem] mt-1.5" style={{ color: "var(--gold)" }}>{note}</div>}
                       </div>
                     </button>
                     {isSel && a.choices && a.choices.length > 0 && (

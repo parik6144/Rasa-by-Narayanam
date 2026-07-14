@@ -1,4 +1,5 @@
 import { CONFIG } from "@/lib/rasa-data";
+import { addonLineTotal, billableGuests, addonUsesGuestFloor } from "@/lib/addon-pricing";
 
 export type QuotationAddonLine = {
   id?: string;
@@ -6,6 +7,7 @@ export type QuotationAddonLine = {
   price: number;
   priceType: string;
   choice?: string | null;
+  guestRange?: number;
 };
 
 export type QuotationPdfData = {
@@ -93,11 +95,17 @@ export function buildQuotationHTML(d: QuotationPdfData): string {
 
   const addonRows = d.addons
     .map((a) => {
-      const line = a.priceType === "per_guest" ? a.price * d.guests : a.price;
+      const line = addonLineTotal(a, d.guests);
+      const billed = billableGuests(d.guests, a.guestRange);
+      const floored = addonUsesGuestFloor(d.guests, a.guestRange);
       const name = a.choice ? `${a.name} (${a.choice})` : a.name;
+      const unitNote =
+        a.priceType === "per_guest" && floored
+          ? ` × ${billed} (min range)`
+          : esc(fmtUnit(a.priceType));
       return `<tr>
         <td>${esc(name)}</td>
-        <td class="nowrap">${fmtMoney(a.price)}${esc(fmtUnit(a.priceType))}</td>
+        <td class="nowrap">${fmtMoney(a.price)}${unitNote}</td>
         <td class="right">${fmtMoney(line)}</td>
       </tr>`;
     })
@@ -219,7 +227,24 @@ export function buildQuotationHTML(d: QuotationPdfData): string {
   }
   .totals .row { display: flex; justify-content: space-between; gap: 8px; padding: 2px 0; font-size: 10.5px; color: var(--ink); }
   .totals .row.dim { color: var(--muted); }
-  .totals .row.disc { color: var(--maroon); }
+  .totals .row.disc {
+    color: #9c2a38;
+    font-weight: 700;
+    background: rgba(156,42,56,.08);
+    margin: 4px -6px;
+    padding: 6px;
+    border-radius: 4px;
+  }
+  .totals .offer-banner {
+    margin: 0 0 8px;
+    padding: 8px 10px;
+    border-radius: 6px;
+    border: 1px solid rgba(198,152,58,.55);
+    background: linear-gradient(135deg,rgba(198,152,58,.18),rgba(246,239,224,.9));
+    color: #2c1a26;
+    font-size: 11px;
+    font-weight: 700;
+  }
   .totals .row.grand {
     margin-top: 4px; padding-top: 6px; border-top: 1.5px solid var(--gold);
     font-size: 13px; font-weight: 700; color: var(--ink);
@@ -332,12 +357,18 @@ export function buildQuotationHTML(d: QuotationPdfData): string {
       <div>
         <div class="block-title">Commercials</div>
         <div class="totals">
-          <div class="row"><span>Package × ${d.guests}</span><span>${fmtMoney(d.pkgTotal)}</span></div>
-          <div class="row"><span>Add-ons</span><span>${fmtMoney(d.addonsTotal)}</span></div>
-          <div class="row dim"><span>Subtotal</span><span>${fmtMoney(d.subtotal)}</span></div>
           ${
             d.discount > 0
-              ? `<div class="row disc"><span>Discount${d.discountNote ? ` (${esc(d.discountNote)})` : ""}</span><span>− ${fmtMoney(d.discount)}</span></div>`
+              ? `<div class="offer-banner">Offer applied${d.discountNote ? `: ${esc(d.discountNote)}` : ""} — you save ${fmtMoney(d.discount)}</div>`
+              : ""
+          }
+          <div class="row"><span>Package × ${d.guests}</span><span>${fmtMoney(d.pkgTotal)}</span></div>
+          <div class="row"><span>Add-ons</span><span>${fmtMoney(d.addonsTotal)}</span></div>
+          <div class="row dim"><span>Subtotal (before offer)</span><span>${fmtMoney(d.subtotal)}</span></div>
+          ${
+            d.discount > 0
+              ? `<div class="row disc"><span>Promo / discount${d.discountNote ? ` — ${esc(d.discountNote)}` : ""}</span><span>− ${fmtMoney(d.discount)}</span></div>
+          <div class="row dim"><span>Taxable after offer</span><span>${fmtMoney(Math.max(0, d.subtotal - d.discount))}</span></div>`
               : ""
           }
           <div class="row"><span>GST @ ${CONFIG.gstPercent}%</span><span>${fmtMoney(d.gst)}</span></div>

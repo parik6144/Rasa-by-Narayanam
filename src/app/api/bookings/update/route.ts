@@ -2,18 +2,17 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+import { hasPermission, isStaffRole } from "@/lib/permissions";
 import { CONFIG } from "@/lib/rasa-data";
-
-/** Snapshot addon prices from the wizard are in rupees; normalize to paise. */
-function addonLinePaise(
-  a: { price?: number; priceType?: string },
-  guests: number
-): number {
-  if (!a.price) return 0;
-  const paise = a.price < 5000 ? a.price * 100 : a.price;
-  if (a.priceType === "per_guest") return paise * guests;
-  return paise;
-}
+import {
+  computePromoDiscount,
+  findValidPromo,
+  promoDiscountNote,
+  repriceBookingMoney,
+  subtotalFromGrossTotal,
+  totalsAfterDiscount,
+  type PromoLike,
+} from "@/lib/promo";
 
 export async function PATCH(req: NextRequest) {
   try {
@@ -23,12 +22,13 @@ export async function PATCH(req: NextRequest) {
     const body = await req.json();
     const {
       bookingId, guests, venue, city, notes, menuSnapshot, addonsSnapshot,
-      customDishes, discount, discountNote, occasion, eventDate, total, advancePaid,
+      customDishes, discount, discountNote, occasion, eventDate, total,
+      promoCode,
     } = body as {
       bookingId?: string; guests?: number; venue?: string; city?: string; notes?: string;
       menuSnapshot?: unknown; addonsSnapshot?: unknown; customDishes?: unknown;
       discount?: number; discountNote?: string; occasion?: string; eventDate?: string;
-      total?: number; advancePaid?: number;
+      total?: number; promoCode?: string | null;
     };
 
     if (!bookingId) return NextResponse.json({ error: "Missing bookingId" }, { status: 422 });
@@ -37,12 +37,13 @@ export async function PATCH(req: NextRequest) {
     if (!booking) return NextResponse.json({ error: "Booking not found" }, { status: 404 });
 
     const isOwner = booking.userId === user.id;
-    const isAdmin = user.role === "admin";
-    if (!isOwner && !isAdmin) {
+    const isStaff = isStaffRole(user.role);
+    const canDiscount = hasPermission(user.role, "bookings.discount");
+    if (!isOwner && !isStaff) {
       return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
 
-    if (!isAdmin) {
+    if (!isStaff) {
       const daysToEvent = Math.floor((booking.eventDate.getTime() - Date.now()) / (1000 * 60 * 60 * 24));
       if (daysToEvent < CONFIG.editWindowDays) {
         return NextResponse.json({
@@ -65,58 +66,107 @@ export async function PATCH(req: NextRequest) {
     if (occasion !== undefined) updateData.occasion = occasion;
     if (eventDate !== undefined) updateData.eventDate = new Date(eventDate);
 
-    if (isAdmin) {
-      if (discount !== undefined) updateData.discount = discount * 100;
-      if (discountNote !== undefined) updateData.discountNote = discountNote;
+    let appliedPromo: PromoLike | null | undefined;
+    let clearPromo = false;
+    if (promoCode !== undefined) {
+      const code = String(promoCode || "").trim();
+      if (!code) {
+        clearPromo = true;
+        appliedPromo = null;
+      } else {
+        const promo = await findValidPromo(code);
+        if (!promo) {
+          return NextResponse.json({ error: "Invalid or expired promo code" }, { status: 422 });
+        }
+        appliedPromo = promo;
+      }
     }
 
-    // Prefer client-computed total (rupees) when provided — matches create booking flow
-    if (typeof total === "number" && total > 0) {
-      const totalAmt = Math.round(total * 100);
-      const gst = Math.round(totalAmt - totalAmt / (1 + CONFIG.gstPercent / 100));
-      const subtotal = totalAmt - gst;
-      updateData.subtotal = subtotal;
-      updateData.gst = gst;
-      updateData.total = totalAmt;
-      updateData.balance = totalAmt - booking.advancePaid;
-    } else if (
+    const shouldReprice =
       guests !== undefined ||
       addonsSnapshot !== undefined ||
-      (isAdmin && discount !== undefined)
-    ) {
-      const pkg = booking.packageId
-        ? await db.package.findUnique({ where: { id: booking.packageId } })
-        : null;
-      const guestCount = guests ?? booking.guests;
-      const packageLine = (pkg?.price || 0) * guestCount; // paise
-      const addonsJson = updateData.addonsSnapshot
-        ? JSON.parse(updateData.addonsSnapshot as string)
-        : JSON.parse(booking.addonsSnapshot || "[]");
-      const addonsTotal = Array.isArray(addonsJson)
-        ? addonsJson.reduce(
-            (sum: number, a: { price?: number; priceType?: string }) =>
-              sum + addonLinePaise(a, guestCount),
-            0
-          )
-        : 0;
-      const discountAmt =
-        isAdmin && discount !== undefined ? discount * 100 : booking.discount;
-      const afterDiscount = Math.max(0, packageLine + addonsTotal - discountAmt);
-      const gst = Math.round(afterDiscount * (CONFIG.gstPercent / 100));
-      const totalAmt = afterDiscount + gst;
-      updateData.subtotal = afterDiscount;
-      updateData.gst = gst;
-      updateData.total = totalAmt;
-      updateData.balance = totalAmt - booking.advancePaid;
+      menuSnapshot !== undefined ||
+      typeof total === "number" ||
+      promoCode !== undefined ||
+      (canDiscount && discount !== undefined);
+
+    let nextPromoId = booking.promoCodeId;
+    let discountPaise = booking.discount || 0;
+    let nextNote = booking.discountNote;
+
+    if (clearPromo) {
+      nextPromoId = null;
+      discountPaise = 0;
+      nextNote = null;
+    } else if (appliedPromo) {
+      nextPromoId = appliedPromo.id;
+      nextNote = promoDiscountNote(appliedPromo);
+    } else if (canDiscount && discount !== undefined) {
+      discountPaise = Math.round(Number(discount) * 100);
+      if (discountNote !== undefined) nextNote = discountNote;
     }
 
-    const updated = await db.booking.update({
-      where: { id: bookingId },
-      data: updateData,
+    if (shouldReprice) {
+      const draft = {
+        ...booking,
+        guests: guests ?? booking.guests,
+        addonsSnapshot:
+          (updateData.addonsSnapshot as string | undefined) ?? booking.addonsSnapshot,
+      };
+      const moneyPreview = await repriceBookingMoney(draft, 0);
+      let preDiscount = moneyPreview.preDiscount;
+      if (preDiscount <= 0 && typeof total === "number" && total > 0) {
+        preDiscount = subtotalFromGrossTotal(Math.round(total * 100));
+      }
+
+      if (appliedPromo) {
+        if (preDiscount < (appliedPromo.minOrderPaise || 0)) {
+          return NextResponse.json(
+            {
+              error: `Minimum order ₹${Math.round((appliedPromo.minOrderPaise || 0) / 100).toLocaleString("en-IN")} for this promo`,
+            },
+            { status: 422 }
+          );
+        }
+        discountPaise = computePromoDiscount(preDiscount, appliedPromo);
+      }
+
+      const priced = totalsAfterDiscount(preDiscount, Math.max(0, discountPaise));
+      updateData.subtotal = priced.subtotal;
+      updateData.discount = priced.discount;
+      updateData.discountNote = nextNote;
+      updateData.promoCodeId = nextPromoId;
+      updateData.gst = priced.gst;
+      updateData.total = priced.total;
+      updateData.balance = Math.max(0, priced.total - booking.advancePaid);
+    }
+
+    const updated = await db.$transaction(async (tx) => {
+      if (promoCode !== undefined) {
+        const prevId = booking.promoCodeId;
+        if (prevId && prevId !== nextPromoId) {
+          await tx.promoCode.updateMany({
+            where: { id: prevId, usedCount: { gt: 0 } },
+            data: { usedCount: { decrement: 1 } },
+          });
+        }
+        if (nextPromoId && prevId !== nextPromoId) {
+          await tx.promoCode.update({
+            where: { id: nextPromoId },
+            data: { usedCount: { increment: 1 } },
+          });
+        }
+      }
+      return tx.booking.update({
+        where: { id: bookingId },
+        data: updateData,
+        include: { promoCode: true },
+      });
     });
 
     return NextResponse.json({ booking: updated });
   } catch (e: unknown) {
+    console.error("[bookings PATCH]", e);
     const msg = e instanceof Error ? e.message : "Server error";
     return NextResponse.json({ error: msg }, { status: 500 });
   }

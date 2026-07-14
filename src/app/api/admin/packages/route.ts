@@ -1,14 +1,16 @@
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth";
+import { requirePermission } from "@/lib/auth";
+import { authErrorResponse } from "@/lib/api-auth";
 import { rebuildPackageSectionsCache, ensureDish, parseSelection } from "@/lib/admin-catalog";
 import { slugify } from "@/lib/selection";
 
 export async function GET() {
   try {
-    await requireAdmin();
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    await requirePermission("catalog.read");
+  } catch (e) {
+    const { status, body } = authErrorResponse(e);
+    return NextResponse.json(body, { status });
   }
 
   const packages = await db.package.findMany({
@@ -60,9 +62,10 @@ export async function GET() {
 
 export async function POST(req: Request) {
   try {
-    await requireAdmin();
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    await requirePermission("catalog.write");
+  } catch (e) {
+    const { status, body } = authErrorResponse(e);
+    return NextResponse.json(body, { status });
   }
 
   const body = await req.json();
@@ -128,9 +131,10 @@ export async function POST(req: Request) {
 
 export async function PATCH(req: Request) {
   try {
-    await requireAdmin();
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    await requirePermission("catalog.write");
+  } catch (e) {
+    const { status, body } = authErrorResponse(e);
+    return NextResponse.json(body, { status });
   }
 
   const body = await req.json();
@@ -161,9 +165,10 @@ export async function PATCH(req: Request) {
 
 export async function DELETE(req: Request) {
   try {
-    await requireAdmin();
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    await requirePermission("catalog.write");
+  } catch (e) {
+    const { status, body } = authErrorResponse(e);
+    return NextResponse.json(body, { status });
   }
 
   const { searchParams } = new URL(req.url);

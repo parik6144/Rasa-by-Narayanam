@@ -43,6 +43,7 @@ interface AdminAddon {
   isNv: boolean;
   isActive: boolean;
   displayOrder: number;
+  guestRange: number;
   choices: string[];
 }
 
@@ -305,6 +306,15 @@ export default function AdminCatalog() {
         </div>
       ) : (
         <div>
+          <div className="mb-4 p-3 rounded-lg text-sm flex items-start gap-2" style={{ background: "rgba(198,152,58,.1)", border: "1px solid rgba(198,152,58,.28)" }}>
+            <span style={{ color: "var(--gold-bright)" }}>ⓘ</span>
+            <span style={{ color: "rgba(246,239,224,.78)" }}>
+              <b style={{ color: "var(--ivory)" }}>Per-guest add-ons</b> use a minimum billable guest count (Guest range).
+              Package price still uses the actual headcount; for these extras the quotation charges
+              <b style={{ color: "var(--gold-bright)" }}> max(your guests, guest range)</b>.
+              Edit any card to change the range (e.g. 500).
+            </span>
+          </div>
           <div className="flex justify-end mb-4">
             <button onClick={() => setEditingAddon("new")} className="glossy-btn-gold px-4 py-2 rounded-md text-sm font-semibold flex items-center gap-2">
               <Plus className="w-4 h-4" /> New Add-on
@@ -322,10 +332,22 @@ export default function AdminCatalog() {
                         <span className="font-medium" style={{ color: "var(--ivory)" }}>{a.name}</span>
                         {a.isNv && <span className="text-[0.6rem] font-bold px-1.5 py-0.5 rounded" style={{ background: "#c0392b", color: "#fff" }}>NV</span>}
                         {!a.isActive && <span className="text-[0.66rem] uppercase px-2 py-0.5 rounded-full" style={{ background: "rgba(156,42,56,.2)", color: "var(--anaar-bright)" }}>Off</span>}
+                        {a.priceType === "per_guest" && a.guestRange > 0 && (
+                          <span className="text-[0.62rem] font-bold tracking-wide uppercase px-2 py-0.5 rounded-full" style={{ background: "rgba(198,152,58,.2)", color: "var(--gold-bright)", border: "1px solid rgba(198,152,58,.45)" }}>
+                            Min {a.guestRange} guests
+                          </span>
+                        )}
                       </div>
                       <div className="text-xs mt-1" style={{ color: "rgba(246,239,224,.62)" }}>
-                        ₹{a.price} · {a.priceType}{a.description ? ` · ${a.description.slice(0, 80)}${a.description.length > 80 ? "…" : ""}` : ""}
+                        ₹{a.price} · {a.priceType}
+                        {a.description ? ` · ${a.description.slice(0, 80)}${a.description.length > 80 ? "…" : ""}` : ""}
                       </div>
+                      {a.priceType === "per_guest" && a.guestRange > 0 && (
+                        <div className="mt-1.5 text-[0.72rem]" style={{ color: "rgba(226,182,88,.85)" }}>
+                          Quotation bills ₹{a.price} × at least {a.guestRange} guests
+                          {" "}(= ₹{(a.price * a.guestRange).toLocaleString("en-IN")} minimum), then actual guests if higher.
+                        </div>
+                      )}
                       {a.choices.length > 0 && (
                         <div className="mt-1 text-[0.7rem]" style={{ color: "rgba(246,239,224,.5)" }}>Choices: {a.choices.slice(0, 5).join(", ")}{a.choices.length > 5 ? "…" : ""}</div>
                       )}
@@ -505,6 +527,7 @@ function AddonForm({ addon, categories, onClose, onSave }: { addon: AdminAddon |
     category: addon?.category || categories[0] || "Beverages & Welcome",
     isNv: addon?.isNv || false,
     isActive: addon?.isActive !== false,
+    guestRange: addon?.guestRange ?? 500,
     choicesText: addon?.choices.join("\n") || "",
   });
   const [saving, setSaving] = useState(false);
@@ -531,6 +554,20 @@ function AddonForm({ addon, categories, onClose, onSave }: { addon: AdminAddon |
             </select>
           </label>
         </div>
+        <label className="block text-xs" style={{ color: "rgba(246,239,224,.62)" }}>
+          Guest range (min billable)
+          <input
+            type="number"
+            min={0}
+            className="mt-1 w-full px-3 py-2 rounded-md text-sm"
+            style={fieldStyle()}
+            value={form.guestRange}
+            onChange={(e) => setForm({ ...form, guestRange: Math.max(0, Number(e.target.value) || 0) })}
+          />
+          <span className="block mt-1 text-[0.7rem]" style={{ color: "rgba(246,239,224,.5)" }}>
+            For per_guest: charge at least this many guests (e.g. 500). 0 = use actual guest count.
+          </span>
+        </label>
         <label className="block text-xs" style={{ color: "rgba(246,239,224,.62)" }}>
           Category
           <input list="addon-cats" className="mt-1 w-full px-3 py-2 rounded-md text-sm" style={fieldStyle()} value={form.category} onChange={(e) => setForm({ ...form, category: e.target.value })} />

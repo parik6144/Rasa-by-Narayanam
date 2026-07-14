@@ -3,6 +3,9 @@ import { useState } from "react";
 import { useApp } from "@/store/app-store";
 import { CONFIG } from "@/lib/rasa-data";
 import { useCatalog } from "@/store/catalog-store";
+import { addonLineTotal, billableGuests, addonUsesGuestFloor, addonPricingNote } from "@/lib/addon-pricing";
+import PromoCodeInput from "@/components/rasa/promo-code-input";
+import PayBookingPanel from "@/components/rasa/pay-booking-panel";
 import { X, ArrowRight, CheckCircle, Calendar, MapPin, Users, FileText, Share2 } from "lucide-react";
 
 export default function QuotationPanel() {
@@ -16,8 +19,13 @@ export default function QuotationPanel() {
   const [notes, setNotes] = useState("");
   const [bookingRef, setBookingRef] = useState<string | null>(null);
   const [bookingId, setBookingId] = useState<string | null>(null);
+  const [balanceDue, setBalanceDue] = useState(0);
+  const [paidAdvance, setPaidAdvance] = useState(0);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  const [promoCode, setPromoCode] = useState<string | null>(null);
+  const [promoDiscount, setPromoDiscount] = useState(0);
+  const [promoFinalTotal, setPromoFinalTotal] = useState<number | null>(null);
 
   if (!quotationPanelOpen) return null;
 
@@ -29,16 +37,34 @@ export default function QuotationPanel() {
     const addonsTotal = activeQuotation.selectedAddons.reduce((sum, id) => {
       const a = getAddon(id);
       if (!a) return sum;
-      if (a.priceType === "per_guest") return sum + a.price * activeQuotation.guests;
-      if (a.priceType === "per_event") return sum + a.price;
-      return sum + a.price;
+      return sum + addonLineTotal(a, activeQuotation.guests);
     }, 0);
     const subtotal = pkgTotal + addonsTotal;
     const gst = Math.round(subtotal * 0.05);
     return { pkgTotal, addonsTotal, subtotal, gst, total: subtotal + gst };
   };
-  const { pkgTotal, addonsTotal, subtotal, gst, total } = calcTotal();
-  const advance = Math.round(total * (CONFIG.advancePercent / 100));
+  const { pkgTotal, addonsTotal, subtotal, total } = calcTotal();
+  const afterOffer = Math.max(0, subtotal - (promoDiscount || 0));
+  const payableGst = Math.round(afterOffer * (CONFIG.gstPercent / 100));
+  const payableTotal = afterOffer + payableGst;
+  const advance = Math.round(payableTotal * (CONFIG.advancePercent / 100));
+
+  const applyPromo = (info: {
+    code: string;
+    discountRupees: number;
+    totalRupees: number;
+    label: string;
+  } | null) => {
+    if (!info) {
+      setPromoCode(null);
+      setPromoDiscount(0);
+      setPromoFinalTotal(null);
+      return;
+    }
+    setPromoCode(info.code);
+    setPromoDiscount(info.discountRupees);
+    setPromoFinalTotal(info.totalRupees);
+  };
 
   const close = () => {
     setQuotationPanel(false);
@@ -46,7 +72,12 @@ export default function QuotationPanel() {
     setEventDate(""); setVenue(""); setNotes("");
     setBookingRef(null);
     setBookingId(null);
+    setBalanceDue(0);
+    setPaidAdvance(0);
     setErr(null);
+    setPromoCode(null);
+    setPromoDiscount(0);
+    setPromoFinalTotal(null);
   };
 
   const confirmBooking = async () => {
@@ -60,24 +91,34 @@ export default function QuotationPanel() {
           packageId: pkg.id,
           eventDate, venue, city,
           guests: activeQuotation.guests,
-          total,
-          advancePaid: advance,
+          total, // gross before promo — server applies promoCode
+          advancePaid: 0,
           menuSnapshot: activeQuotation.selectedDishes,
           addonsSnapshot: activeQuotation.selectedAddons.map((id) => {
             const a = getAddon(id);
-            return { id, name: a?.name, price: a?.price, priceType: a?.priceType, choice: activeQuotation.addonChoices[id] || null };
+            return {
+              id,
+              name: a?.name,
+              price: a?.price,
+              priceType: a?.priceType,
+              guestRange: a?.guestRange || 0,
+              choice: activeQuotation.addonChoices[id] || null,
+            };
           }),
           customDishes: activeQuotation.customDishes,
           occasion,
           notes,
+          promoCode: promoCode || undefined,
         }),
       });
       const data = await res.json();
       if (!res.ok) throw new Error(data.error || "Booking failed");
       setBookingRef(data.booking.bookingRef);
       setBookingId(data.booking.id);
+      setPaidAdvance(Math.round((data.booking.advancePaid || 0) / 100));
+      setBalanceDue(Math.round((data.booking.balance || data.booking.total || 0) / 100));
       setStep("success");
-      setToast("Booking confirmed!");
+      setToast("Booking confirmed — you can pay below");
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "Booking failed");
     } finally {
@@ -99,7 +140,13 @@ export default function QuotationPanel() {
           menu: activeQuotation.selectedDishes,
           addons: activeQuotation.selectedAddons.map((id) => {
             const a = getAddon(id);
-            return { id, name: a?.name, price: a?.price, priceType: a?.priceType };
+            return {
+              id,
+              name: a?.name,
+              price: a?.price,
+              priceType: a?.priceType,
+              guestRange: a?.guestRange || 0,
+            };
           }),
           guests: activeQuotation.guests,
           total,
@@ -148,10 +195,22 @@ export default function QuotationPanel() {
                 {activeQuotation.selectedAddons.map((id) => {
                   const a = getAddon(id);
                   if (!a) return null;
-                  const price = a.priceType === "per_guest" ? a.price * activeQuotation.guests : a.price;
+                  const price = addonLineTotal(a, activeQuotation.guests);
+                  const billed = billableGuests(activeQuotation.guests, a.guestRange);
+                  const floored = addonUsesGuestFloor(activeQuotation.guests, a.guestRange);
                   return (
                     <div key={id} className="flex justify-between text-[0.9rem] py-1" style={{ color: "#2c1a26" }}>
-                      <span>{a.name}{activeQuotation.addonChoices[id] ? ` · ${activeQuotation.addonChoices[id]}` : ""}</span>
+                      <span>
+                        {a.name}{activeQuotation.addonChoices[id] ? ` · ${activeQuotation.addonChoices[id]}` : ""}
+                        {a.priceType === "per_guest" && (
+                          <span className="block text-[0.72rem]" style={{ color: "var(--on-ivory-dim)" }}>
+                            {addonPricingNote(a, activeQuotation.guests) ||
+                              (floored
+                                ? `₹${a.price} × ${billed} guests (min range)`
+                                : `₹${a.price} × ${billed} guests`)}
+                          </span>
+                        )}
+                      </span>
                       <span className="font-semibold" style={{ color: "var(--anaar)" }}>₹{price.toLocaleString("en-IN")}</span>
                     </div>
                   );
@@ -166,17 +225,56 @@ export default function QuotationPanel() {
             {/* Pricing */}
             <div className="rounded-lg p-5 mt-4" style={{ background: "var(--ivory-2)" }}>
               <div className="flex justify-between text-[0.94rem] py-1" style={{ color: "#3a2733" }}>
-                <span>Subtotal</span><span>₹{subtotal.toLocaleString("en-IN")}</span>
+                <span>Menu subtotal</span><span>₹{subtotal.toLocaleString("en-IN")}</span>
               </div>
+              {promoDiscount > 0 && (
+                <>
+                  <div className="flex justify-between text-[0.94rem] py-1" style={{ color: "#1f7a5c" }}>
+                    <span>Offer {promoCode}</span>
+                    <span>−₹{promoDiscount.toLocaleString("en-IN")}</span>
+                  </div>
+                  <div className="flex justify-between text-[0.94rem] py-1" style={{ color: "var(--on-ivory-dim)" }}>
+                    <span>After offer</span><span>₹{afterOffer.toLocaleString("en-IN")}</span>
+                  </div>
+                </>
+              )}
               <div className="flex justify-between text-[0.94rem] py-1" style={{ color: "#3a2733" }}>
-                <span>GST @ 5%</span><span>₹{gst.toLocaleString("en-IN")}</span>
+                <span>GST @ {CONFIG.gstPercent}%</span>
+                <span>₹{payableGst.toLocaleString("en-IN")}</span>
               </div>
               <div className="flex justify-between font-display text-[1.35rem] pt-3 mt-2 border-t" style={{ color: "#2c1a26", borderColor: "rgba(58,39,51,.2)" }}>
-                <span>Estimated Total</span><span style={{ color: "var(--anaar)" }}>₹{total.toLocaleString("en-IN")}</span>
+                <span>Total payable</span><span style={{ color: "var(--anaar)" }}>₹{payableTotal.toLocaleString("en-IN")}</span>
               </div>
               <div className="text-[0.78rem] mt-2" style={{ color: "var(--on-ivory-dim)" }}>
-                Advance to pay now ({CONFIG.advancePercent}%): <b style={{ color: "var(--anaar)" }}>₹{advance.toLocaleString("en-IN")}</b> · Balance ₹{(total - advance).toLocaleString("en-IN")} due 48 hours before event.
+                {promoDiscount > 0
+                  ? "Offer first on menu total, then GST is added. "
+                  : "GST is added on the menu total. "}
+                Suggested advance ({CONFIG.advancePercent}%): <b style={{ color: "var(--anaar)" }}>₹{advance.toLocaleString("en-IN")}</b>
+                {" · "}Balance ₹{(payableTotal - advance).toLocaleString("en-IN")}.
               </div>
+            </div>
+
+            <div
+              className="mt-4 rounded-lg p-4"
+              style={{
+                background: "linear-gradient(135deg,rgba(198,152,58,.18),#fff)",
+                border: "2px solid rgba(198,152,58,.55)",
+              }}
+            >
+              <div className="font-display text-[1.2rem] mb-1" style={{ color: "#2c1a26" }}>
+                Offer / promo code
+              </div>
+              <p className="text-sm mb-3" style={{ color: "var(--on-ivory-dim)" }}>
+                Try <b>RASA10</b> or <b>FLAT5K</b> — discount applies before GST.
+              </p>
+              <PromoCodeInput
+                theme="light"
+                totalRupees={total}
+                appliedCode={promoCode}
+                appliedDiscountRupees={promoDiscount || undefined}
+                onToast={setToast}
+                onApplied={applyPromo}
+              />
             </div>
 
             <button onClick={() => setStep("checkout")} className="glossy-btn-gold w-full py-3.5 rounded-md font-semibold tracking-[0.03em] text-[0.95rem] mt-5 flex items-center justify-center gap-2">
@@ -191,8 +289,29 @@ export default function QuotationPanel() {
             <div className="text-[0.72rem] font-semibold tracking-[0.32em] uppercase mb-1" style={{ color: "var(--anaar)" }}>Checkout</div>
             <h3 className="font-display text-[1.9rem] mb-1" style={{ color: "#2c1a26" }}>Confirm your event</h3>
             <p className="text-[0.88rem] mb-5 font-light" style={{ color: "var(--on-ivory-dim)" }}>
-              Pay <b style={{ color: "var(--anaar)" }}>₹{advance.toLocaleString("en-IN")}</b> advance (mock UPI) to lock your booking.
+              Payable total <b style={{ color: "var(--anaar)" }}>₹{payableTotal.toLocaleString("en-IN")}</b>
+              {promoCode ? ` (promo ${promoCode})` : ""}. Pay advance via Stripe or UPI after confirming.
             </p>
+
+            <div
+              className="mb-5 rounded-lg p-4"
+              style={{
+                background: "linear-gradient(135deg,rgba(198,152,58,.15),#fff)",
+                border: "2px solid rgba(198,152,58,.5)",
+              }}
+            >
+              <div className="font-display text-[1.15rem] mb-2" style={{ color: "#2c1a26" }}>
+                Offer code
+              </div>
+              <PromoCodeInput
+                theme="light"
+                totalRupees={total}
+                appliedCode={promoCode}
+                appliedDiscountRupees={promoDiscount || undefined}
+                onToast={setToast}
+                onApplied={applyPromo}
+              />
+            </div>
 
             <div className="space-y-4">
               <div>
@@ -242,7 +361,7 @@ export default function QuotationPanel() {
                 Back
               </button>
               <button onClick={confirmBooking} disabled={loading} className="glossy-btn-gold py-3 rounded-md font-semibold tracking-[0.03em] text-[0.95rem] disabled:opacity-60">
-                {loading ? "Processing…" : `Pay ₹${advance.toLocaleString("en-IN")} & Confirm`}
+                {loading ? "Processing…" : `Confirm · then pay ₹${advance.toLocaleString("en-IN")}+`}
               </button>
             </div>
           </>
@@ -259,9 +378,31 @@ export default function QuotationPanel() {
             <h3 className="font-display text-[2rem] mb-2" style={{ color: "#2c1a26" }}>Booking confirmed!</h3>
             <p className="text-[1rem] mb-5" style={{ color: "var(--on-ivory-dim)" }}>
               Your booking reference is <b style={{ color: "#2c1a26" }}>{bookingRef}</b>.<br />
-              We've received your advance of <b style={{ color: "var(--anaar)" }}>₹{advance.toLocaleString("en-IN")}</b>.
-              Our team will call you within 24 hours to finalize the menu.
+              Total <b style={{ color: "var(--anaar)" }}>₹{payableTotal.toLocaleString("en-IN")}</b>
+              {promoCode ? ` with promo ${promoCode}` : ""}.
+              Suggested advance <b style={{ color: "var(--anaar)" }}>₹{advance.toLocaleString("en-IN")}</b> — pay below or later from My Bookings.
             </p>
+
+            {bookingId && balanceDue > 0 && (
+              <div className="text-left mb-5">
+                <PayBookingPanel
+                  bookingId={bookingId}
+                  bookingRef={bookingRef || undefined}
+                  defaultAmountRupees={Math.min(advance, balanceDue)}
+                  maxAmountRupees={balanceDue}
+                  theme="light"
+                  allowPromo={false}
+                  onToast={setToast}
+                  onPaid={({ amountRupees, method }) => {
+                    if (method === "upi") setToast("UPI claim sent");
+                    else {
+                      setPaidAdvance((p) => p + amountRupees);
+                      setBalanceDue((b) => Math.max(0, b - amountRupees));
+                    }
+                  }}
+                />
+              </div>
+            )}
 
             {activeQuotation.customDishes && activeQuotation.customDishes.length > 0 && (
               <div className="text-left mb-5 p-3 rounded-md" style={{ background: "rgba(198,152,58,.08)", border: "1px solid var(--paper-line)" }}>

@@ -8,10 +8,13 @@ import {
   nextStepHint, pickInspireAddons, temptForAddon, fmtShortDate, editCutoffDate,
 } from "@/lib/booking-journey";
 import { packageImage } from "@/lib/site-images";
+import { addonLineTotal, billableGuests, addonUsesGuestFloor, addonMinGuestsBadge, addonPricingNote } from "@/lib/addon-pricing";
 import {
   ArrowLeft, ArrowRight, Check, Plus, Minus, Sparkles, Share2,
-  Calendar, MapPin, Users, FileText, CheckCircle, AlertCircle, Info, Flame, Compass,
+  Calendar, MapPin, Users, FileText, CheckCircle, AlertCircle, Info, Flame, Compass, Trash2, Pencil,
 } from "lucide-react";
+import PayBookingPanel from "@/components/rasa/pay-booking-panel";
+import PromoCodeInput from "@/components/rasa/promo-code-input";
 
 const STEP_META: { id: BookingStep; label: string; hint: string }[] = [
   { id: "menu", label: "1. Menu", hint: "Pick dishes for each course" },
@@ -27,7 +30,7 @@ export default function BookingWizard() {
     menuBuilderPkgId, bookingStep, bookingSectionIndex,
     setBookingStep, setBookingSectionIndex, closeBooking,
     activeQuotation, setActiveQuotation, user, setAuthModal, setToast, setView, resetQuotation,
-    editingBookingId, editingBookingRef, clearEditingBooking,
+    editingBookingId, editingBookingRef, editingPromo, clearEditingBooking,
   } = useApp();
   const { getPackage, getAddon, addons } = useCatalog();
   const isEditing = !!editingBookingId;
@@ -44,9 +47,37 @@ export default function BookingWizard() {
   const [bookingId, setBookingId] = useState<string | null>(editingBookingId);
   const [savedAsEdit, setSavedAsEdit] = useState(false);
   const [paidAdvance, setPaidAdvance] = useState(0);
+  const [balanceDue, setBalanceDue] = useState(0);
   const [loading, setLoading] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   const [skipWarn, setSkipWarn] = useState(false);
+  const [promoCode, setPromoCode] = useState<string | null>(editingPromo?.code ?? null);
+  const [promoDiscount, setPromoDiscount] = useState(editingPromo?.discountRupees ?? 0);
+  const [promoFinalTotal, setPromoFinalTotal] = useState<number | null>(
+    editingPromo?.code && editingPromo.totalRupees > 0 ? editingPromo.totalRupees : null
+  );
+
+  // When opening an existing booking to edit, restore its applied offer into the wizard
+  useEffect(() => {
+    if (!editingBookingId) return;
+    setBookingId(editingBookingId);
+    setBookingRef(editingBookingRef);
+    if (editingPromo?.code) {
+      setPromoCode(editingPromo.code);
+      setPromoDiscount(editingPromo.discountRupees || 0);
+      setPromoFinalTotal(editingPromo.totalRupees > 0 ? editingPromo.totalRupees : null);
+    } else {
+      setPromoCode(null);
+      setPromoDiscount(0);
+      setPromoFinalTotal(null);
+    }
+  }, [
+    editingBookingId,
+    editingBookingRef,
+    editingPromo?.code,
+    editingPromo?.discountRupees,
+    editingPromo?.totalRupees,
+  ]);
 
   const pkg = menuBuilderPkgId ? getPackage(menuBuilderPkgId) : undefined;
   const addonCategories = useMemo(() => Array.from(new Set(addons.map((a) => a.category))), [addons]);
@@ -59,6 +90,44 @@ export default function BookingWizard() {
   useEffect(() => {
     if (pkg && !customSection) setCustomSection(pkg.sections[0]?.section || "Other");
   }, [pkg, customSection]);
+
+  // Keep discount in sync when guests/extras change while a promo is applied
+  useEffect(() => {
+    if (!promoCode || !pkg) return;
+    const guests = activeQuotation.guests;
+    const pkgTotal = pkg.price * guests;
+    const addonsTotal = activeQuotation.selectedAddons.reduce((sum, id) => {
+      const a = getAddon(id);
+      if (!a) return sum;
+      return sum + addonLineTotal(a, guests);
+    }, 0);
+    const gross = pkgTotal + addonsTotal + Math.round((pkgTotal + addonsTotal) * 0.05);
+    let cancelled = false;
+    void (async () => {
+      try {
+        const r = await fetch("/api/promos/validate", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ code: promoCode, totalRupees: gross }),
+        });
+        const d = await r.json();
+        if (cancelled || !r.ok) return;
+        setPromoDiscount(d.discountRupees || 0);
+        setPromoFinalTotal(d.totalRupees ?? null);
+      } catch {
+        /* keep hydrated values */
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    promoCode,
+    pkg,
+    activeQuotation.guests,
+    activeQuotation.selectedAddons,
+    getAddon,
+  ]);
 
   if (!menuBuilderPkgId || !pkg) {
     return (
@@ -96,15 +165,18 @@ export default function BookingWizard() {
     const addonsTotal = selectedAddons.reduce((sum, id) => {
       const a = getAddon(id);
       if (!a) return sum;
-      if (a.priceType === "per_guest") return sum + a.price * activeQuotation.guests;
-      return sum + a.price;
+      return sum + addonLineTotal(a, activeQuotation.guests);
     }, 0);
     const subtotal = pkgTotal + addonsTotal;
     const gst = Math.round(subtotal * 0.05);
     return { pkgTotal, addonsTotal, subtotal, gst, total: subtotal + gst };
   };
-  const { pkgTotal, addonsTotal, subtotal, gst, total } = calcTotal();
-  const advance = Math.round(total * (CONFIG.advancePercent / 100));
+  const { pkgTotal, addonsTotal, subtotal, total } = calcTotal();
+  // Clear bill for guests: menu → offer → GST ₹ amount → total (never hide GST as "included")
+  const afterOffer = Math.max(0, subtotal - (promoDiscount || 0));
+  const payableGst = Math.round(afterOffer * (CONFIG.gstPercent / 100));
+  const payableTotal = afterOffer + payableGst;
+  const advance = Math.round(payableTotal * (CONFIG.advancePercent / 100));
 
   const toggleDish = (section: string, dish: string, max: number) => {
     const cur = selected[section] || [];
@@ -177,7 +249,7 @@ export default function BookingWizard() {
     setBookingStep("event");
   };
 
-  const confirmBooking = async (advancePaidNow = advance) => {
+  const confirmBooking = async (_advancePaidNow = 0) => {
     if (!eventDate || !venue || !city) {
       setErr("Event date, venue and city are required");
       return;
@@ -190,7 +262,14 @@ export default function BookingWizard() {
     setErr(null);
     const addonsSnapshot = selectedAddons.map((id) => {
       const a = getAddon(id);
-      return { id, name: a?.name, price: a?.price, priceType: a?.priceType, choice: activeQuotation.addonChoices[id] || null };
+      return {
+        id,
+        name: a?.name,
+        price: a?.price,
+        priceType: a?.priceType,
+        guestRange: a?.guestRange || 0,
+        choice: activeQuotation.addonChoices[id] || null,
+      };
     });
     try {
       if (isEditing && editingBookingId) {
@@ -202,24 +281,26 @@ export default function BookingWizard() {
             bookingId: editingBookingId,
             eventDate, venue, city,
             guests: activeQuotation.guests,
-            total,
+            total, // gross before promo — server applies promoCode
             menuSnapshot: activeQuotation.selectedDishes,
             addonsSnapshot,
             customDishes,
             occasion,
             notes,
+            promoCode: promoCode || null,
           }),
         });
         const data = await res.json();
         if (!res.ok) throw new Error(data.error || "Update failed");
         setBookingRef(data.booking.bookingRef || editingBookingRef);
         setBookingId(data.booking.id);
+        setPaidAdvance(Math.round((data.booking.advancePaid || 0) / 100));
+        setBalanceDue(Math.round((data.booking.balance || data.booking.total || 0) / 100));
         setSavedAsEdit(true);
         setBookingStep("success");
-        setToast("Booking updated");
+        setToast("Booking updated — you can pay any remaining balance below");
         clearEditingBooking();
       } else {
-        const payNow = Math.max(0, Math.round(advancePaidNow));
         const res = await fetch("/api/bookings", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -228,17 +309,27 @@ export default function BookingWizard() {
             packageId: pkg.id,
             eventDate, venue, city,
             guests: activeQuotation.guests,
-            total,
-            advancePaid: payNow,
+            total, // gross before promo — server applies promoCode
+            advancePaid: 0,
             menuSnapshot: activeQuotation.selectedDishes,
             addonsSnapshot,
             customDishes,
             occasion,
             notes,
+            promoCode: promoCode || undefined,
           }),
         });
         const raw = await res.text();
-        let data: { error?: string; booking?: { bookingRef: string; id: string } } = {};
+        let data: {
+          error?: string;
+          booking?: {
+            bookingRef: string;
+            id: string;
+            balance?: number;
+            total?: number;
+            advancePaid?: number;
+          };
+        } = {};
         try {
           data = raw ? JSON.parse(raw) : {};
         } catch {
@@ -246,11 +337,12 @@ export default function BookingWizard() {
         }
         if (!res.ok) throw new Error(data.error || `Booking failed (HTTP ${res.status})`);
         if (!data.booking?.bookingRef) throw new Error("Booking saved but no reference returned");
-        setPaidAdvance(payNow);
+        setPaidAdvance(Math.round((data.booking.advancePaid || 0) / 100));
+        setBalanceDue(Math.round((data.booking.balance || data.booking.total || 0) / 100));
         setBookingRef(data.booking.bookingRef);
         setBookingId(data.booking.id);
         setBookingStep("success");
-        setToast(payNow > 0 ? "Booking confirmed!" : "Booking confirmed — pay later");
+        setToast("Booking confirmed — pay now or later");
       }
     } catch (e: unknown) {
       setErr(e instanceof Error ? e.message : "Booking failed");
@@ -477,12 +569,19 @@ export default function BookingWizard() {
             <p className="text-[1rem] mb-2" style={{ color: "var(--on-ivory-dim)" }}>
               Your package is the foundation. These extras are what guests photograph and remember — add what fits your evening, or skip.
             </p>
-            <div className="rounded-lg p-3 mb-5 text-sm flex items-start gap-2" style={{ background: "rgba(198,152,58,.1)", border: "1px solid rgba(198,152,58,.25)" }}>
-              <Info className="w-4 h-4 mt-0.5" style={{ color: "var(--gold)" }} />
-              <span>
-                Selected: <b>{selectedAddons.length}</b> extra(s).
-                {" "}After booking you can still edit until {CONFIG.editWindowDays} days before the event.
-              </span>
+            <div className="rounded-lg p-3.5 mb-5 text-sm flex items-start gap-2.5" style={{ background: "rgba(198,152,58,.12)", border: "1px solid rgba(198,152,58,.35)" }}>
+              <Info className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: "var(--gold)" }} />
+              <div>
+                <div className="font-semibold mb-1" style={{ color: "#2c1a26" }}>
+                  Notice: per-guest add-ons have a minimum charge
+                </div>
+                <p style={{ color: "var(--on-ivory-dim)" }}>
+                  You currently have <b>{activeQuotation.guests.toLocaleString("en-IN")} guests</b>.
+                  {" "}If an extra says <b>Min 500 guests</b> (or another minimum), you still pay for that many —
+                  e.g. 100 guests → charged as <b>500 × rate</b>. Above the minimum, you pay for actual guests.
+                  {" "}Package price always uses your real count only. Selected: <b>{selectedAddons.length}</b> extra(s).
+                </p>
+              </div>
             </div>
 
             {inspire.length > 0 && (
@@ -496,6 +595,8 @@ export default function BookingWizard() {
                     const t = temptForAddon(a);
                     const priceStr = a.priceType === "per_guest" ? `₹${a.price}/guest` : `₹${a.price}`;
                     const isSel = selectedAddons.includes(a.id);
+                    const badge = addonMinGuestsBadge(a);
+                    const note = isSel ? addonPricingNote(a, activeQuotation.guests) : addonPricingNote(a);
                     return (
                       <button
                         key={a.id}
@@ -511,9 +612,13 @@ export default function BookingWizard() {
                         <div className="text-[0.65rem] font-bold uppercase tracking-[0.16em] mb-1" style={{ color: "var(--anaar)" }}>{t.hook}</div>
                         <div className="flex justify-between gap-2">
                           <span className="font-display text-[1.15rem]">{a.name}</span>
-                          <span className="font-semibold whitespace-nowrap" style={{ color: "var(--anaar)" }}>{priceStr}</span>
+                          <span className="font-semibold whitespace-nowrap text-right" style={{ color: "var(--anaar)" }}>
+                            {priceStr}
+                            {badge && <span className="block text-[0.65rem] font-medium opacity-80">{badge}</span>}
+                          </span>
                         </div>
                         <p className="text-sm mt-1" style={{ color: "var(--on-ivory-dim)" }}>{t.vibe}</p>
+                        {note && <p className="text-[0.72rem] mt-1.5" style={{ color: "var(--gold)" }}>{note}</p>}
                         <div className="mt-2 text-xs font-semibold" style={{ color: isSel ? "var(--gold)" : "var(--on-ivory-dim)" }}>
                           {isSel ? "✓ Added to your evening" : "+ Add to my event"}
                         </div>
@@ -542,6 +647,8 @@ export default function BookingWizard() {
                 const isSel = selectedAddons.includes(a.id);
                 const priceStr = a.priceType === "per_guest" ? `₹${a.price}/guest` : `₹${a.price}`;
                 const t = temptForAddon(a);
+                const badge = addonMinGuestsBadge(a);
+                const note = isSel ? addonPricingNote(a, activeQuotation.guests) : addonPricingNote(a);
                 return (
                   <button
                     key={a.id}
@@ -555,10 +662,14 @@ export default function BookingWizard() {
                     <div className="flex-1">
                       <div className="flex justify-between gap-3">
                         <span className="font-display text-[1.1rem]">{a.name}{a.nv ? " · NV" : ""}</span>
-                        <span className="font-semibold whitespace-nowrap" style={{ color: "var(--anaar)" }}>{priceStr}</span>
+                        <span className="font-semibold whitespace-nowrap text-right" style={{ color: "var(--anaar)" }}>
+                          {priceStr}
+                          {badge && <span className="block text-[0.65rem] font-medium opacity-80">{badge}</span>}
+                        </span>
                       </div>
                       <div className="text-[0.7rem] font-semibold mt-0.5" style={{ color: "var(--gold)" }}>{t.hook}</div>
                       {a.description && <div className="text-sm mt-1" style={{ color: "var(--on-ivory-dim)" }}>{a.description}</div>}
+                      {note && <div className="text-[0.72rem] mt-1.5" style={{ color: "var(--gold)" }}>{note}</div>}
                     </div>
                   </button>
                 );
@@ -664,13 +775,67 @@ export default function BookingWizard() {
                 <Plus className="w-5 h-5" />
               </button>
             </div>
-            <div className="rounded-xl p-5 mb-8 text-left" style={{ background: "#fff", border: "1px solid rgba(58,39,51,.12)" }}>
+            <div className="rounded-xl p-5 mb-4 text-left" style={{ background: "#fff", border: "1px solid rgba(58,39,51,.12)" }}>
               <div className="flex justify-between py-1"><span>Package</span><span>₹{pkgTotal.toLocaleString("en-IN")}</span></div>
               <div className="flex justify-between py-1"><span>Add-ons</span><span>₹{addonsTotal.toLocaleString("en-IN")}</span></div>
-              <div className="flex justify-between py-1"><span>GST 5%</span><span>₹{gst.toLocaleString("en-IN")}</span></div>
-              <div className="flex justify-between font-display text-[1.4rem] pt-3 mt-2 border-t" style={{ borderColor: "rgba(58,39,51,.15)" }}>
-                <span>Total</span><span style={{ color: "var(--anaar)" }}>₹{total.toLocaleString("en-IN")}</span>
+              <div className="flex justify-between py-1 text-sm" style={{ color: "var(--on-ivory-dim)" }}>
+                <span>Menu subtotal</span><span>₹{subtotal.toLocaleString("en-IN")}</span>
               </div>
+              {promoDiscount > 0 && (
+                <>
+                  <div className="flex justify-between py-1" style={{ color: "#1f7a5c" }}>
+                    <span>Offer {promoCode}</span>
+                    <span>−₹{promoDiscount.toLocaleString("en-IN")}</span>
+                  </div>
+                  <div className="flex justify-between py-1 text-sm" style={{ color: "var(--on-ivory-dim)" }}>
+                    <span>After offer</span><span>₹{afterOffer.toLocaleString("en-IN")}</span>
+                  </div>
+                </>
+              )}
+              <div className="flex justify-between py-1">
+                <span>GST {CONFIG.gstPercent}%</span>
+                <span>₹{payableGst.toLocaleString("en-IN")}</span>
+              </div>
+              <div className="flex justify-between font-display text-[1.4rem] pt-3 mt-2 border-t" style={{ borderColor: "rgba(58,39,51,.15)" }}>
+                <span>Total payable</span><span style={{ color: "var(--anaar)" }}>₹{payableTotal.toLocaleString("en-IN")}</span>
+              </div>
+              <p className="text-[0.72rem] mt-2" style={{ color: "var(--on-ivory-dim)" }}>
+                {promoDiscount > 0
+                  ? "Offer first on menu total, then GST is added."
+                  : "GST is added on the menu total."}
+              </p>
+            </div>
+            <div
+              className="rounded-xl p-4 mb-8 text-left"
+              style={{
+                background: "linear-gradient(135deg,rgba(198,152,58,.18),#fff)",
+                border: "2px solid rgba(198,152,58,.55)",
+              }}
+            >
+              <div className="font-display text-[1.2rem] mb-1" style={{ color: "#2c1a26" }}>
+                Offer / promo code
+              </div>
+              <p className="text-sm mb-3" style={{ color: "var(--on-ivory-dim)" }}>
+                Try <b>RASA10</b> or <b>FLAT5K</b>
+              </p>
+              <PromoCodeInput
+                theme="light"
+                totalRupees={total}
+                appliedCode={promoCode}
+                appliedDiscountRupees={promoDiscount || undefined}
+                onToast={setToast}
+                onApplied={(info) => {
+                  if (!info) {
+                    setPromoCode(null);
+                    setPromoDiscount(0);
+                    setPromoFinalTotal(null);
+                    return;
+                  }
+                  setPromoCode(info.code);
+                  setPromoDiscount(info.discountRupees);
+                  setPromoFinalTotal(info.totalRupees);
+                }}
+              />
             </div>
             <div className="flex flex-col sm:flex-row gap-3">
               <button onClick={() => setBookingStep("custom")} className="flex-1 py-3.5 rounded-lg font-semibold" style={{ background: "#fff", border: "1px solid rgba(58,39,51,.2)" }}>Back</button>
@@ -764,21 +929,248 @@ export default function BookingWizard() {
             </div>
 
             {selectedAddons.length > 0 && (
-              <div className="rounded-xl p-5 mb-4" style={{ background: "#fff", border: "1px solid rgba(58,39,51,.12)" }}>
-                <div className="font-display text-[1.2rem] mb-2">Add-ons</div>
-                {selectedAddons.map((id) => {
-                  const a = getAddon(id);
-                  if (!a) return null;
-                  return <div key={id} className="text-sm py-1 flex justify-between"><span>{a.name}</span><span>₹{a.priceType === "per_guest" ? a.price * activeQuotation.guests : a.price}</span></div>;
-                })}
+              <div
+                className="rounded-xl p-5 sm:p-6 mb-4 relative overflow-hidden"
+                style={{
+                  background: "linear-gradient(165deg, #2a1a28 0%, #1a0f19 55%, #231318 100%)",
+                  border: "1px solid rgba(226,182,88,.35)",
+                  boxShadow: "0 18px 40px -18px rgba(47,30,47,.45)",
+                }}
+              >
+                <div
+                  className="pointer-events-none absolute inset-0 opacity-40"
+                  style={{
+                    background:
+                      "radial-gradient(ellipse at top right, rgba(198,152,58,.18), transparent 55%), radial-gradient(ellipse at bottom left, rgba(156,42,56,.12), transparent 50%)",
+                  }}
+                />
+                <div className="relative flex flex-wrap items-end justify-between gap-3 mb-5 pb-4" style={{ borderBottom: "1px solid rgba(226,182,88,.22)" }}>
+                  <div className="min-w-0 flex-1">
+                    <div className="text-[0.68rem] font-semibold tracking-[0.28em] uppercase mb-1" style={{ color: "var(--gold-bright)" }}>
+                      Curated extras
+                    </div>
+                    <div className="font-display text-[1.45rem]" style={{ color: "var(--ivory)" }}>
+                      Add-ons
+                    </div>
+                    <p className="text-[0.82rem] mt-1" style={{ color: "rgba(246,239,224,.62)" }}>
+                      {selectedAddons.length} selected for this evening
+                    </p>
+                  </div>
+                  <div className="flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setBookingStep("addons")}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[0.75rem] font-semibold transition-opacity hover:opacity-90"
+                      style={{ background: "rgba(198,152,58,.18)", border: "1px solid rgba(226,182,88,.45)", color: "var(--gold-bright)" }}
+                    >
+                      <Pencil className="w-3.5 h-3.5" /> Edit selection
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setBookingStep("addons")}
+                      className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-[0.75rem] font-semibold"
+                      style={{ background: "var(--gold)", color: "#231318" }}
+                    >
+                      <Plus className="w-3.5 h-3.5" /> Add more
+                    </button>
+                  </div>
+                </div>
+
+                <div
+                  className="relative mb-4 rounded-lg p-3.5 flex gap-2.5 items-start"
+                  style={{
+                    background: "rgba(198,152,58,.14)",
+                    border: "1px solid rgba(226,182,88,.4)",
+                  }}
+                >
+                  <Info className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: "var(--gold-bright)" }} />
+                  <div className="text-[0.84rem] leading-relaxed" style={{ color: "rgba(246,239,224,.88)" }}>
+                    <div className="font-semibold mb-1" style={{ color: "var(--gold-bright)" }}>
+                      Minimum guest charge on per-guest add-ons
+                    </div>
+                    <p>
+                      Your party is <b style={{ color: "var(--ivory)" }}>{activeQuotation.guests.toLocaleString("en-IN")} guests</b>.
+                      {" "}For add-ons marked <b style={{ color: "var(--ivory)" }}>Min … guests</b>, you are still billed for that
+                      minimum even if your headcount is lower — e.g. 100 guests with a 500 minimum means the add-on is charged as{" "}
+                      <b style={{ color: "var(--ivory)" }}>500 × rate</b>, not 100.
+                      {" "}If your count is higher than the minimum, you pay for the actual count.
+                      {" "}The <b style={{ color: "var(--ivory)" }}>package</b> price always stays on your real guest count only.
+                    </p>
+                  </div>
+                </div>
+
+                <div className="relative space-y-3">
+                  {selectedAddons.map((id) => {
+                    const a = getAddon(id);
+                    if (!a) return null;
+                    const line = addonLineTotal(a, activeQuotation.guests);
+                    const billed = billableGuests(activeQuotation.guests, a.guestRange);
+                    const floored = addonUsesGuestFloor(activeQuotation.guests, a.guestRange);
+                    const badge = addonMinGuestsBadge(a);
+                    const choice = activeQuotation.addonChoices[id];
+                    const unitLabel =
+                      a.priceType === "per_guest"
+                        ? `/guest`
+                        : a.priceType === "per_event"
+                          ? "/event"
+                          : a.priceType === "per_variety"
+                            ? "/variety"
+                            : "";
+                    return (
+                      <div
+                        key={id}
+                        className="rounded-lg p-4 flex flex-col sm:flex-row sm:items-center gap-3"
+                        style={{
+                          background: "rgba(246,239,224,.04)",
+                          border: "1px solid rgba(226,182,88,.2)",
+                        }}
+                      >
+                        <div className="flex-1 min-w-0">
+                          <div className="flex flex-wrap items-center gap-2 mb-1">
+                            <span className="font-display text-[1.12rem]" style={{ color: "var(--ivory)" }}>
+                              {a.name}
+                            </span>
+                            {a.nv && (
+                              <span className="text-[0.58rem] font-bold px-1.5 py-0.5 rounded" style={{ background: "#c0392b", color: "#fff" }}>
+                                NV
+                              </span>
+                            )}
+                            {badge && (
+                              <span
+                                className="text-[0.6rem] font-bold tracking-wide uppercase px-2 py-0.5 rounded-full"
+                                style={{ background: "rgba(198,152,58,.22)", color: "var(--gold-bright)", border: "1px solid rgba(226,182,88,.35)" }}
+                              >
+                                {badge}
+                              </span>
+                            )}
+                          </div>
+                          {choice && (
+                            <div className="text-[0.78rem] mb-1" style={{ color: "rgba(226,182,88,.85)" }}>
+                              Choice: {choice}
+                            </div>
+                          )}
+                          <div className="text-[0.78rem]" style={{ color: "rgba(246,239,224,.58)" }}>
+                            ₹{a.price.toLocaleString("en-IN")}
+                            {unitLabel}
+                            {a.priceType === "per_guest" && (
+                              <>
+                                {" · "}
+                                {floored
+                                  ? `billed for ${billed.toLocaleString("en-IN")} guests (min range; party has ${activeQuotation.guests})`
+                                  : `× ${billed.toLocaleString("en-IN")} guests`}
+                              </>
+                            )}
+                          </div>
+                        </div>
+                        <div className="flex items-center gap-3 sm:flex-col sm:items-end sm:gap-2 flex-shrink-0">
+                          <div className="font-display text-[1.25rem] whitespace-nowrap" style={{ color: "var(--gold-bright)" }}>
+                            ₹{line.toLocaleString("en-IN")}
+                          </div>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => setBookingStep("addons")}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[0.72rem] font-semibold"
+                              style={{ border: "1px solid rgba(226,182,88,.4)", color: "var(--gold-bright)" }}
+                              title="Change this extra on the Extras step"
+                            >
+                              <Pencil className="w-3 h-3" /> Edit
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                toggleAddon(id);
+                                setToast(`${a.name} removed from extras`);
+                              }}
+                              className="inline-flex items-center gap-1 px-2.5 py-1 rounded-md text-[0.72rem] font-semibold"
+                              style={{ border: "1px solid rgba(196,80,90,.45)", color: "#e8a0a8" }}
+                              title="Remove this add-on"
+                            >
+                              <Trash2 className="w-3 h-3" /> Remove
+                            </button>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+
+                <div
+                  className="relative mt-4 pt-4 flex justify-between items-baseline"
+                  style={{ borderTop: "1px solid rgba(226,182,88,.22)" }}
+                >
+                  <span className="text-[0.8rem] tracking-[0.12em] uppercase" style={{ color: "rgba(246,239,224,.55)" }}>
+                    Add-ons subtotal
+                  </span>
+                  <span className="font-display text-[1.35rem]" style={{ color: "var(--ivory)" }}>
+                    ₹{addonsTotal.toLocaleString("en-IN")}
+                  </span>
+                </div>
               </div>
             )}
 
-            <div className="rounded-xl p-5 mb-6" style={{ background: "rgba(47,30,47,.06)" }}>
-              <div className="flex justify-between py-1"><span>Subtotal</span><span>₹{subtotal.toLocaleString("en-IN")}</span></div>
-              <div className="flex justify-between py-1"><span>GST 5%</span><span>₹{gst.toLocaleString("en-IN")}</span></div>
-              <div className="flex justify-between font-display text-[1.5rem] pt-2"><span>Total</span><span style={{ color: "var(--anaar)" }}>₹{total.toLocaleString("en-IN")}</span></div>
-              <div className="text-sm mt-1" style={{ color: "var(--on-ivory-dim)" }}>Advance ({CONFIG.advancePercent}%): ₹{advance.toLocaleString("en-IN")}</div>
+            <div className="rounded-xl p-5 mb-4" style={{ background: "rgba(47,30,47,.06)" }}>
+              <div className="flex justify-between py-1"><span>Menu subtotal</span><span>₹{subtotal.toLocaleString("en-IN")}</span></div>
+              {promoDiscount > 0 && (
+                <>
+                  <div className="flex justify-between py-1" style={{ color: "#1f7a5c" }}>
+                    <span>Offer {promoCode}</span>
+                    <span>−₹{promoDiscount.toLocaleString("en-IN")}</span>
+                  </div>
+                  <div className="flex justify-between py-1 text-sm" style={{ color: "var(--on-ivory-dim)" }}>
+                    <span>After offer</span><span>₹{afterOffer.toLocaleString("en-IN")}</span>
+                  </div>
+                </>
+              )}
+              <div className="flex justify-between py-1">
+                <span>GST {CONFIG.gstPercent}%</span>
+                <span>₹{payableGst.toLocaleString("en-IN")}</span>
+              </div>
+              <div className="flex justify-between font-display text-[1.5rem] pt-2 border-t mt-2" style={{ borderColor: "rgba(58,39,51,.12)" }}>
+                <span>Total payable</span>
+                <span style={{ color: "var(--anaar)" }}>₹{payableTotal.toLocaleString("en-IN")}</span>
+              </div>
+              <p className="text-[0.72rem] mt-2" style={{ color: "var(--on-ivory-dim)" }}>
+                {promoDiscount > 0
+                  ? "Offer first on menu total, then GST is added."
+                  : "GST is added on the menu total."}
+              </p>
+              <div className="text-sm mt-1" style={{ color: "var(--on-ivory-dim)" }}>
+                Suggested advance ({CONFIG.advancePercent}%): ₹{advance.toLocaleString("en-IN")}
+              </div>
+            </div>
+
+            <div
+              className="mb-6 rounded-xl p-5"
+              style={{
+                background: "linear-gradient(135deg,rgba(198,152,58,.18),rgba(246,239,224,.95))",
+                border: "2px solid rgba(198,152,58,.55)",
+              }}
+            >
+              <div className="font-display text-[1.35rem] mb-1" style={{ color: "#2c1a26" }}>
+                Offer / promo code
+              </div>
+              <p className="text-sm mb-3" style={{ color: "var(--on-ivory-dim)" }}>
+                Try <b>RASA10</b> or <b>FLAT5K</b> — discount applies before GST.
+              </p>
+              <PromoCodeInput
+                theme="light"
+                totalRupees={total}
+                appliedCode={promoCode}
+                appliedDiscountRupees={promoDiscount || undefined}
+                onToast={setToast}
+                onApplied={(info) => {
+                  if (!info) {
+                    setPromoCode(null);
+                    setPromoDiscount(0);
+                    setPromoFinalTotal(null);
+                    return;
+                  }
+                  setPromoCode(info.code);
+                  setPromoDiscount(info.discountRupees);
+                  setPromoFinalTotal(info.totalRupees);
+                }}
+              />
             </div>
 
             <div className="flex flex-col sm:flex-row gap-3">
@@ -849,12 +1241,67 @@ export default function BookingWizard() {
 
             {err && <div className="text-center text-sm font-semibold mb-4" style={{ color: "var(--anaar)" }}>{err}</div>}
 
-            <div className="rounded-xl p-4 mb-4 text-sm" style={{ background: "rgba(47,30,47,.06)", border: "1px solid rgba(58,39,51,.1)" }}>
-              <div className="flex justify-between mb-1"><span>Estimated total</span><b>₹{total.toLocaleString("en-IN")}</b></div>
+            <div className="rounded-xl p-4 mb-4 text-sm space-y-2" style={{ background: "rgba(47,30,47,.06)", border: "1px solid rgba(58,39,51,.1)" }}>
+              <div className="flex justify-between"><span>Menu + add-ons</span><span>₹{subtotal.toLocaleString("en-IN")}</span></div>
+              {promoDiscount > 0 && (
+                <>
+                  <div className="flex justify-between" style={{ color: "#1f7a5c" }}>
+                    <span>Offer {promoCode}</span>
+                    <span>−₹{promoDiscount.toLocaleString("en-IN")}</span>
+                  </div>
+                  <div className="flex justify-between" style={{ color: "var(--on-ivory-dim)" }}>
+                    <span>After offer</span>
+                    <span>₹{afterOffer.toLocaleString("en-IN")}</span>
+                  </div>
+                </>
+              )}
+              <div className="flex justify-between">
+                <span>GST {CONFIG.gstPercent}%</span>
+                <span>₹{payableGst.toLocaleString("en-IN")}</span>
+              </div>
+              <div className="flex justify-between font-semibold pt-1 border-t" style={{ borderColor: "rgba(58,39,51,.12)" }}>
+                <span>Total payable</span>
+                <b>₹{payableTotal.toLocaleString("en-IN")}</b>
+              </div>
+              <p className="text-[0.72rem]" style={{ color: "var(--on-ivory-dim)" }}>
+                {promoDiscount > 0
+                  ? "Offer first on menu total, then GST is added."
+                  : "GST is added on the menu total."}
+              </p>
               <div className="flex justify-between" style={{ color: "var(--on-ivory-dim)" }}>
                 <span>Suggested advance ({CONFIG.advancePercent}%)</span>
                 <span>₹{advance.toLocaleString("en-IN")}</span>
               </div>
+            </div>
+
+            <div
+              className="mb-4 rounded-xl p-4"
+              style={{
+                background: "linear-gradient(135deg,rgba(198,152,58,.15),#fff)",
+                border: "2px solid rgba(198,152,58,.5)",
+              }}
+            >
+              <div className="font-display text-[1.2rem] mb-2" style={{ color: "#2c1a26" }}>
+                Offer code{isEditing && promoCode ? " (already applied)" : ""}
+              </div>
+              <PromoCodeInput
+                theme="light"
+                totalRupees={total}
+                appliedCode={promoCode}
+                appliedDiscountRupees={promoDiscount || undefined}
+                onToast={setToast}
+                onApplied={(info) => {
+                  if (!info) {
+                    setPromoCode(null);
+                    setPromoDiscount(0);
+                    setPromoFinalTotal(null);
+                    return;
+                  }
+                  setPromoCode(info.code);
+                  setPromoDiscount(info.discountRupees);
+                  setPromoFinalTotal(info.totalRupees);
+                }}
+              />
             </div>
 
             <div className="flex flex-col gap-3">
@@ -866,22 +1313,14 @@ export default function BookingWizard() {
               ) : (
                 <>
                   <button
-                    onClick={() => confirmBooking(advance)}
+                    onClick={() => confirmBooking(0)}
                     disabled={loading}
                     className="w-full glossy-btn-gold py-3.5 rounded-lg font-semibold disabled:opacity-60"
                   >
-                    {loading ? "Confirming…" : `Pay ₹${advance.toLocaleString("en-IN")} & Confirm`}
-                  </button>
-                  <button
-                    onClick={() => confirmBooking(0)}
-                    disabled={loading}
-                    className="w-full py-3.5 rounded-lg font-semibold disabled:opacity-60"
-                    style={{ background: "#fff", border: "1.5px solid rgba(198,152,58,.55)", color: "#2c1a26" }}
-                  >
-                    {loading ? "Confirming…" : "Confirm with ₹0 now — pay later"}
+                    {loading ? "Confirming…" : "Confirm booking — pay now or later"}
                   </button>
                   <p className="text-center text-[0.78rem]" style={{ color: "var(--on-ivory-dim)" }}>
-                    Zero-payment booking is confirmed instantly. Our team will share payment timeline on call.
+                    Your booking is locked first. Next screen lets you pay suggested advance (₹{advance.toLocaleString("en-IN")}) via Stripe or UPI QR anytime.
                   </p>
                 </>
               )}
@@ -900,11 +1339,38 @@ export default function BookingWizard() {
                 {!savedAsEdit && (
                   paidAdvance > 0
                     ? <> · Advance ₹{paidAdvance.toLocaleString("en-IN")} recorded.</>
-                    : <> · Confirmed with ₹0 paid now — balance due as per our team.</>
+                    : <> · You can pay the suggested advance now or from My Bookings anytime.</>
                 )}
                 {" "}Our team will call you within 24 hours.
               </p>
             </div>
+
+            {bookingId && (balanceDue > 0 || (!savedAsEdit && paidAdvance <= 0)) && (
+              <div className="mb-5">
+                <div className="font-display text-[1.25rem] mb-2 text-center" style={{ color: "#2c1a26" }}>
+                  Pay now
+                </div>
+                <PayBookingPanel
+                  bookingId={bookingId}
+                  bookingRef={bookingRef || undefined}
+                  defaultAmountRupees={Math.min(
+                    advance,
+                    balanceDue > 0 ? balanceDue : payableTotal
+                  )}
+                  maxAmountRupees={balanceDue > 0 ? balanceDue : payableTotal}
+                  theme="light"
+                  allowPromo={false}
+                  onToast={setToast}
+                  onPaid={({ amountRupees, method }) => {
+                    if (method === "upi") setToast("UPI claim sent — pay panel stays until admin confirms");
+                    else {
+                      setPaidAdvance((p) => p + amountRupees);
+                      setBalanceDue((b) => Math.max(0, b - amountRupees));
+                    }
+                  }}
+                />
+              </div>
+            )}
 
             <div className="text-left rounded-xl p-5 mb-5 space-y-3" style={{ background: "#fff", border: "1px solid rgba(58,39,51,.12)" }}>
               <div className="font-display text-[1.2rem] mb-1">What happens next</div>
@@ -914,7 +1380,7 @@ export default function BookingWizard() {
                   ? `Polish menu & extras until ${fmtShortDate(editCutoffDate(eventDate))} — open My Bookings → Edit.`
                   : `You can edit the menu until ${CONFIG.editWindowDays} days before the event.`,
                 "Want live counters or mithai? Add them while editing is open.",
-                "Balance payment timeline will be shared by our team.",
+                "Balance anytime via Stripe or UPI QR from My Bookings.",
               ].map((line, i) => (
                 <div key={line} className="flex gap-3 text-sm">
                   <span className="w-6 h-6 rounded-full flex items-center justify-center flex-shrink-0 text-xs font-bold" style={{ background: "rgba(198,152,58,.2)", color: "#2c1a26" }}>{i + 1}</span>

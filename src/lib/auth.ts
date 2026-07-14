@@ -4,6 +4,11 @@ import bcrypt from "bcryptjs";
 import { cookies } from "next/headers";
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
+import {
+  hasPermission,
+  isStaffRole,
+  type Permission,
+} from "@/lib/permissions";
 
 const SESSION_COOKIE = "rasa_session";
 const SECRET = new TextEncoder().encode(process.env.SESSION_SECRET || "rasa-secret-change-in-prod-please-32bytes!");
@@ -91,8 +96,18 @@ export async function getCurrentUser() {
   if (!session) return null;
   const user = await db.user.findUnique({
     where: { id: session.userId },
-    select: { id: true, email: true, name: true, phone: true, role: true, city: true, dietaryPrefs: true },
+    select: {
+      id: true,
+      email: true,
+      name: true,
+      phone: true,
+      role: true,
+      city: true,
+      dietaryPrefs: true,
+      isActive: true,
+    },
   });
+  if (!user || !user.isActive) return null;
   return user;
 }
 
@@ -102,8 +117,22 @@ export async function requireUser() {
   return u;
 }
 
+/** True owner admin only (team management). */
 export async function requireAdmin() {
   const u = await requireUser();
   if (u.role !== "admin") throw new Error("FORBIDDEN");
+  return u;
+}
+
+/** Any staff role that may use /admin. */
+export async function requireStaff() {
+  const u = await requireUser();
+  if (!isStaffRole(u.role)) throw new Error("FORBIDDEN");
+  return u;
+}
+
+export async function requirePermission(perm: Permission) {
+  const u = await requireStaff();
+  if (!hasPermission(u.role, perm)) throw new Error("FORBIDDEN");
   return u;
 }

@@ -6,14 +6,31 @@ import {
   canEditBooking, daysUntilEvent, editCutoffDate, fmtShortDate, buildBookingNextSteps,
 } from "@/lib/booking-journey";
 import { ArrowLeft, Calendar, Users, MapPin, Phone, Mail, LogOut, Wallet, Bell, Star, Pencil, CheckCircle2, Lock } from "lucide-react";
+import PayBookingPanel from "@/components/rasa/pay-booking-panel";
+import PaymentHistory from "@/components/rasa/payment-history";
+import PromoCodeInput from "@/components/rasa/promo-code-input";
 
 interface Booking {
   id: string; bookingRef: string; eventDate: string; venue: string; city: string;
   guests: number; status: string; total: number; advancePaid: number; balance: number;
+  subtotal?: number;
   occasion?: string | null; notes?: string | null;
   menuSnapshot?: string | null; addonsSnapshot?: string | null; customDishes?: string | null;
   package?: { name: string; slug: string; id?: string } | null;
-  payments?: { id: string; amount: number; method: string; status: string }[];
+  discount?: number;
+  discountNote?: string | null;
+  promoCode?: { code: string; label: string } | null;
+  payments?: {
+    id: string;
+    amount: number;
+    method: string;
+    status: string;
+    gateway?: string;
+    note?: string | null;
+    proofUrl?: string | null;
+    createdAt?: string;
+    confirmedAt?: string | null;
+  }[];
 }
 
 interface Quotation {
@@ -33,6 +50,14 @@ export default function UserDashboard() {
   const [quotations, setQuotations] = useState<Quotation[]>([]);
   const [loading, setLoading] = useState(true);
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [payBookingId, setPayBookingId] = useState<string | null>(null);
+
+  const refreshBookings = () => {
+    fetch("/api/bookings")
+      .then((r) => r.json())
+      .then((b) => setBookings(b.bookings || []))
+      .catch(() => {});
+  };
 
   useEffect(() => {
     if (!user) { setAuthModal("login"); return; }
@@ -87,8 +112,15 @@ export default function UserDashboard() {
       city: b.city,
       occasion: b.occasion || undefined,
       notes: b.notes || undefined,
+      promoCode: b.promoCode?.code || null,
+      promoDiscountRupees: b.discount ? Math.round(b.discount / 100) : 0,
+      promoTotalRupees: b.total ? Math.round(b.total / 100) : 0,
     });
-    setToast("Edit mode — change extras or menu, then save");
+    setToast(
+      b.promoCode?.code
+        ? `Edit mode — offer ${b.promoCode.code} is already applied`
+        : "Edit mode — change extras or menu, then save"
+    );
   };
 
   if (!user) return null;
@@ -183,6 +215,9 @@ export default function UserDashboard() {
                     expanded={expandedId === b.id}
                     onToggle={() => setExpandedId(expandedId === b.id ? null : b.id)}
                     onEdit={() => startEdit(b)}
+                    payOpen={payBookingId === b.id}
+                    onPayToggle={() => setPayBookingId(payBookingId === b.id ? null : b.id)}
+                    onPaid={() => { refreshBookings(); setPayBookingId(null); }}
                   />
                 ))
               )}
@@ -209,6 +244,9 @@ export default function UserDashboard() {
                   expanded={expandedId === b.id}
                   onToggle={() => setExpandedId(expandedId === b.id ? null : b.id)}
                   onEdit={() => startEdit(b)}
+                  payOpen={payBookingId === b.id}
+                  onPayToggle={() => setPayBookingId(payBookingId === b.id ? null : b.id)}
+                  onPaid={() => { refreshBookings(); setPayBookingId(null); }}
                 />
               ))
             )}
@@ -293,7 +331,7 @@ export default function UserDashboard() {
   );
 }
 
-function BookingCard({ b, fmtDate, fmtMoney, statusColor, expanded, onToggle, onEdit }: {
+function BookingCard({ b, fmtDate, fmtMoney, statusColor, expanded, onToggle, onEdit, payOpen, onPayToggle, onPaid }: {
   b: Booking;
   fmtDate: (s: string) => string;
   fmtMoney: (n: number) => string;
@@ -301,7 +339,11 @@ function BookingCard({ b, fmtDate, fmtMoney, statusColor, expanded, onToggle, on
   expanded: boolean;
   onToggle: () => void;
   onEdit: () => void;
+  payOpen: boolean;
+  onPayToggle: () => void;
+  onPaid: () => void;
 }) {
+  const { setToast } = useApp();
   const days = daysUntilEvent(b.eventDate);
   const canEdit = canEditBooking(b.eventDate, b.status);
   const cutoff = editCutoffDate(b.eventDate);
@@ -312,6 +354,15 @@ function BookingCard({ b, fmtDate, fmtMoney, statusColor, expanded, onToggle, on
     balance: b.balance,
     hasAddons: addons.length > 0,
   });
+  // Prefer live math — stored `balance` can go stale after promo edits
+  const owedPaise = Math.max(0, (b.total || 0) - (b.advancePaid || 0));
+  const balanceRupees = Math.max(0, Math.round(owedPaise / 100));
+  const suggested = Math.max(
+    1,
+    Math.min(balanceRupees, Math.round((b.total || 0) * (CONFIG.advancePercent / 100) / 100) || 1)
+  );
+  const pendingUpi = (b.payments || []).some((p) => p.status === "pending" && p.method === "upi");
+  const showPay = balanceRupees > 0 && b.status !== "cancelled" && b.status !== "completed";
 
   return (
     <div className="glossy-card rounded-lg p-5 mb-3">
@@ -336,13 +387,23 @@ function BookingCard({ b, fmtDate, fmtMoney, statusColor, expanded, onToggle, on
               Edit window closed — call {CONFIG.phoneDisplay} for kitchen changes
             </div>
           ) : null}
+          {pendingUpi && (
+            <div className="text-[0.72rem] mt-1" style={{ color: "var(--gold)" }}>
+              UPI payment claim pending admin confirmation
+            </div>
+          )}
         </div>
         <div className="text-right">
           <div className="font-display text-[1.4rem]" style={{ color: "var(--gold-bright)" }}>{fmtMoney(b.total)}</div>
           <div className="text-xs" style={{ color: "rgba(246,239,224,.62)" }}>
-            Paid: {fmtMoney(b.advancePaid)} · Balance: {fmtMoney(b.balance)}
+            Paid: {fmtMoney(b.advancePaid)} · Balance: {fmtMoney(owedPaise)}
           </div>
           <div className="flex gap-1 mt-2 justify-end flex-wrap">
+            {showPay && (
+              <button onClick={onPayToggle} className="glossy-btn-gold px-2 py-1 rounded text-[0.66rem] font-semibold inline-flex items-center gap-1">
+                <Wallet className="w-3 h-3" /> {payOpen ? "Hide pay" : "Pay now"}
+              </button>
+            )}
             <button onClick={() => window.open(`/api/quotation-pdf?bookingId=${b.id}`, "_blank")} className="glossy-btn-gold px-2 py-1 rounded text-[0.66rem] font-semibold">
               Quotation PDF
             </button>
@@ -356,6 +417,108 @@ function BookingCard({ b, fmtDate, fmtMoney, statusColor, expanded, onToggle, on
             </button>
           </div>
         </div>
+      </div>
+
+      {showPay && b.advancePaid === 0 && (
+        <div
+          className="mt-4 p-4 rounded-md"
+          style={{ background: "rgba(198,152,58,.12)", border: "2px solid rgba(198,152,58,.45)" }}
+        >
+          <div className="font-display text-[1.1rem] mb-2" style={{ color: "var(--ivory)" }}>
+            Offer / promo code
+          </div>
+          <PromoCodeInput
+            theme="dark"
+            mode="subtotal"
+            totalRupees={Math.round(((b.subtotal || 0) + (b.discount || 0)) / 100) || Math.round(b.total / 100 / 1.05)}
+            appliedCode={b.promoCode?.code || null}
+            appliedDiscountRupees={b.discount ? Math.round(b.discount / 100) : undefined}
+            onToast={setToast}
+            onApplied={async (info) => {
+              if (!info) {
+                const r = await fetch("/api/bookings/promo", {
+                  method: "POST",
+                  credentials: "include",
+                  headers: { "Content-Type": "application/json" },
+                  body: JSON.stringify({ bookingId: b.id, clear: true }),
+                });
+                const d = await r.json();
+                if (!r.ok) setToast(d.error || "Could not remove promo");
+                else onPaid();
+                return;
+              }
+              const r = await fetch("/api/bookings/promo", {
+                method: "POST",
+                credentials: "include",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ bookingId: b.id, code: info.code }),
+              });
+              const d = await r.json();
+              if (!r.ok) setToast(d.error || "Could not apply promo");
+              else {
+                setToast(`Promo ${info.code} applied`);
+                onPaid();
+              }
+            }}
+          />
+        </div>
+      )}
+
+      {showPay && (
+        <div className="mt-4">
+          {!payOpen ? (
+            <button
+              type="button"
+              onClick={onPayToggle}
+              className="w-full glossy-btn-gold py-3.5 rounded-lg font-semibold flex items-center justify-center gap-2"
+            >
+              <Wallet className="w-4 h-4" /> Pay now — balance ₹{balanceRupees.toLocaleString("en-IN")}
+            </button>
+          ) : (
+            <div className="space-y-2">
+              <button
+                type="button"
+                onClick={onPayToggle}
+                className="text-xs font-semibold underline"
+                style={{ color: "var(--gold)" }}
+              >
+                Hide payment options
+              </button>
+              <PayBookingPanel
+                bookingId={b.id}
+                bookingRef={b.bookingRef}
+                defaultAmountRupees={Math.min(suggested, balanceRupees)}
+                maxAmountRupees={balanceRupees}
+                theme="dark"
+                allowPromo={b.advancePaid === 0}
+                appliedPromoCode={b.promoCode?.code || null}
+                appliedPromoDiscountRupees={b.discount ? Math.round(b.discount / 100) : undefined}
+                onToast={setToast}
+                onBookingUpdated={onPaid}
+                onPaid={onPaid}
+              />
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Payments always visible when linked to this order */}
+      <div className="mt-4 pt-4 border-t" style={{ borderColor: "var(--paper-line)" }}>
+        <PaymentHistory
+          theme="dark"
+          title={`Payments for order ${b.bookingRef}`}
+          payments={(b.payments || []).map((p) => ({
+            id: p.id,
+            amount: p.amount,
+            method: p.method,
+            status: p.status,
+            gateway: p.gateway || "mock",
+            note: p.note,
+            proofUrl: p.proofUrl,
+            createdAt: p.createdAt || new Date().toISOString(),
+            confirmedAt: p.confirmedAt,
+          }))}
+        />
       </div>
 
       {expanded && (

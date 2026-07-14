@@ -2,7 +2,8 @@
 import { NextResponse } from "next/server";
 import { mkdir, writeFile } from "fs/promises";
 import path from "path";
-import { requireAdmin } from "@/lib/auth";
+import { requirePermission } from "@/lib/auth";
+import { authErrorResponse } from "@/lib/api-auth";
 
 const MAX_BYTES = 12 * 1024 * 1024; // 12 MB
 const ALLOWED = new Set([
@@ -22,9 +23,10 @@ function safeName(name: string) {
 
 export async function POST(req: Request) {
   try {
-    await requireAdmin();
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    await requirePermission("leads.write");
+  } catch (e) {
+    const { status, body } = authErrorResponse(e);
+    return NextResponse.json(body, { status });
   }
 
   try {

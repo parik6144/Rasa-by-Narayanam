@@ -3,8 +3,10 @@ import { readFile } from "fs/promises";
 import path from "path";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+import { isStaffRole } from "@/lib/permissions";
 import { CONFIG } from "@/lib/rasa-data";
 import { buildQuotationHTML, type QuotationAddonLine } from "@/lib/quotation-pdf-html";
+import { addonLineTotal } from "@/lib/addon-pricing";
 
 async function resolveLogoDataUri(origin: string): Promise<string> {
   const relative = (CONFIG.logo.startsWith("/") ? CONFIG.logo : `/${CONFIG.logo}`).replace(/^\//, "");
@@ -58,6 +60,7 @@ function parseAddons(raw: string | null | undefined): QuotationAddonLine[] {
       price: Number(a.price) || 0,
       priceType: String(a.priceType || "per_event"),
       choice: a.choice != null ? String(a.choice) : null,
+      guestRange: Number(a.guestRange) || 0,
     }));
   } catch {
     return [];
@@ -123,11 +126,11 @@ export async function GET(req: NextRequest) {
     if (bookingId) {
       const b = await db.booking.findUnique({
         where: { id: bookingId },
-        include: { package: true, user: true },
+        include: { package: true, user: true, promoCode: true },
       });
       const isOwner = !!b && b.userId === user.id;
-      const isAdmin = user.role === "admin";
-      if (!b || (!isOwner && !isAdmin)) {
+      const isStaff = isStaffRole(user.role);
+      if (!b || (!isOwner && !isStaff)) {
         return NextResponse.json({ error: "Not found" }, { status: 404 });
       }
 
@@ -145,7 +148,11 @@ export async function GET(req: NextRequest) {
       notes = b.notes || "";
       status = b.status || "pending";
       discount = paiseToRupees(b.discount);
-      discountNote = b.discountNote || "";
+      discountNote =
+        b.discountNote ||
+        (b.promoCode
+          ? `PROMO ${b.promoCode.code}${b.promoCode.label ? ` · ${b.promoCode.label}` : ""}`
+          : "");
 
       // Always use booking owner for customer identity (admin must not appear as customer)
       customerName = b.user?.name || "Customer";
@@ -166,12 +173,12 @@ export async function GET(req: NextRequest) {
       if (share.bookingId) {
         const b = await db.booking.findUnique({
           where: { id: share.bookingId },
-          include: { package: true, user: true },
+          include: { package: true, user: true, promoCode: true },
         });
         if (b) {
           const isOwner = b.userId === user.id;
-          const isAdmin = user.role === "admin";
-          if (!isOwner && !isAdmin) {
+          const isStaff = isStaffRole(user.role);
+          if (!isOwner && !isStaff) {
             return NextResponse.json({ error: "Not found" }, { status: 404 });
           }
           menu = parseMenu(b.menuSnapshot) || parseMenu(share.menuJson);
@@ -190,7 +197,11 @@ export async function GET(req: NextRequest) {
           notes = b.notes || "";
           status = b.status || "pending";
           discount = paiseToRupees(b.discount);
-          discountNote = b.discountNote || "";
+          discountNote =
+            b.discountNote ||
+            (b.promoCode
+              ? `PROMO ${b.promoCode.code}${b.promoCode.label ? ` · ${b.promoCode.label}` : ""}`
+              : "");
           customerName = b.user?.name || "Customer";
           customerPhone = b.user?.phone || "—";
           customerEmail = b.user?.email || "";
@@ -214,28 +225,51 @@ export async function GET(req: NextRequest) {
     }
 
     const pkgTotal = pkgPrice * guests;
-    const addonsTotal = addons.reduce((s, a) => {
-      if (a.priceType === "per_guest") return s + a.price * guests;
-      return s + a.price;
-    }, 0);
-    const computedSubtotal = pkgTotal + addonsTotal;
-    const afterDiscount = computedSubtotal - discount;
-    const computedGst = Math.round(afterDiscount * (CONFIG.gstPercent / 100));
-    const computedTotal = afterDiscount + computedGst;
-    const computedAdvance = Math.round(computedTotal * (CONFIG.advancePercent / 100));
-    const computedBalance = computedTotal - computedAdvance;
+    const addonsTotal = addons.reduce((s, a) => s + addonLineTotal(a, guests), 0);
+    const computedGross = pkgTotal + addonsTotal;
+    const discountRupees = Math.max(0, discount);
+
+    /**
+     * Normalize commercials:
+     * - Correct promo save: subtotal = net after discount → gross = subtotal + discount
+     * - Broken edit save: subtotal still ≈ package+addons (gross) while discount field remains
+     */
+    let grossSubtotal = computedGross;
+    if (storedSubtotal != null && storedSubtotal > 0) {
+      const looksLikeGross =
+        discountRupees > 0 &&
+        Math.abs(storedSubtotal - computedGross) <= Math.max(100, Math.round(computedGross * 0.03));
+      if (looksLikeGross) {
+        grossSubtotal = storedSubtotal;
+      } else {
+        // treat stored subtotal as net after discount
+        grossSubtotal = storedSubtotal + discountRupees;
+      }
+    }
+
+    const netSubtotal = Math.max(0, grossSubtotal - discountRupees);
+    let gstRupees = Math.round(netSubtotal * (CONFIG.gstPercent / 100));
+    let totalRupees = netSubtotal + gstRupees;
+
+    // Prefer stored totals when they already reflect the offer (total ≈ net + gst)
+    if (storedTotal != null && storedTotal > 0) {
+      const storedImpliesOffer =
+        discountRupees === 0 ||
+        Math.abs(storedTotal - (netSubtotal + Math.round(netSubtotal * (CONFIG.gstPercent / 100)))) <=
+          Math.max(5, Math.round(storedTotal * 0.01));
+      if (storedImpliesOffer) {
+        totalRupees = storedTotal;
+        if (storedGst != null) gstRupees = storedGst;
+      }
+    }
 
     const useStored = storedTotal != null && storedTotal > 0;
-    const subtotal = useStored && storedSubtotal != null ? storedSubtotal : computedSubtotal;
-    const gst = useStored && storedGst != null ? storedGst : computedGst;
-    const total = useStored ? storedTotal! : computedTotal;
-    // Respect ₹0 advance (pay later) when booking totals were persisted
     const advance =
       useStored && storedAdvance != null
         ? storedAdvance
-        : Math.round(total * (CONFIG.advancePercent / 100));
+        : Math.round(totalRupees * (CONFIG.advancePercent / 100));
     const balance =
-      useStored && storedBalance != null ? storedBalance : Math.max(0, total - advance);
+      useStored && storedBalance != null ? storedBalance : Math.max(0, totalRupees - advance);
 
     const html = buildQuotationHTML({
       logo,
@@ -257,14 +291,14 @@ export async function GET(req: NextRequest) {
       customDishes,
       pkgTotal,
       addonsTotal,
-      subtotal,
-      discount,
+      subtotal: grossSubtotal,
+      discount: discountRupees,
       discountNote,
-      gst,
-      total,
+      gst: gstRupees,
+      total: totalRupees,
       advance,
       balance,
-      issuedBy: user.role === "admin" ? "admin" : "customer",
+      issuedBy: isStaffRole(user.role) ? "admin" : "customer",
     });
 
     return new NextResponse(html, {

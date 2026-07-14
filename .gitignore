@@ -18,4 +18,8 @@ Thumbs.db
 .idea/
 .vscode/
 
-# Keep .env in repo (requested)
+# Keep secrets local — never commit Stripe keys
+.env
+.env.local
+.env.*.local
+!.env.example

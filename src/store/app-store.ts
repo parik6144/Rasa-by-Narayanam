@@ -62,6 +62,8 @@ interface AppState {
   toast: string | null;
   editingBookingId: string | null;
   editingBookingRef: string | null;
+  /** Promo already on the booking being edited */
+  editingPromo: { code: string; discountRupees: number; totalRupees: number } | null;
   setView: (v: View) => void;
   setAuthModal: (m: AuthModal) => void;
   setUser: (u: User | null) => void;
@@ -82,6 +84,9 @@ interface AppState {
     city?: string;
     occasion?: string;
     notes?: string;
+    promoCode?: string | null;
+    promoDiscountRupees?: number;
+    promoTotalRupees?: number;
   }) => void;
   clearEditingBooking: () => void;
   closeBooking: () => void;
@@ -137,6 +142,7 @@ export const useApp = create<AppState>((set) => ({
   quotationPanelOpen: false,
   editingBookingId: null,
   editingBookingRef: null,
+  editingPromo: null,
   activeQuotation: { ...emptyQuote },
   setView: (v) => set({ view: v }),
   setAuthModal: (m) => set({ authModal: m }),
@@ -157,6 +163,7 @@ export const useApp = create<AppState>((set) => ({
       bookingSectionIndex: 0,
       editingBookingId: null,
       editingBookingRef: null,
+      editingPromo: null,
       activeQuotation: { ...emptyQuote, packageId: pkgId },
     }),
   openBookingEditor: (payload) =>
@@ -167,6 +174,13 @@ export const useApp = create<AppState>((set) => ({
       bookingSectionIndex: 0,
       editingBookingId: payload.bookingId,
       editingBookingRef: payload.bookingRef,
+      editingPromo: payload.promoCode
+        ? {
+            code: payload.promoCode,
+            discountRupees: Math.max(0, payload.promoDiscountRupees || 0),
+            totalRupees: Math.max(0, payload.promoTotalRupees || 0),
+          }
+        : null,
       activeQuotation: {
         packageId: payload.packageSlug,
         guests: payload.guests || 100,
@@ -181,7 +195,8 @@ export const useApp = create<AppState>((set) => ({
         notes: payload.notes,
       },
     }),
-  clearEditingBooking: () => set({ editingBookingId: null, editingBookingRef: null }),
+  clearEditingBooking: () =>
+    set({ editingBookingId: null, editingBookingRef: null, editingPromo: null }),
   closeBooking: () =>
     set({
       menuBuilderPkgId: null,
@@ -191,6 +206,7 @@ export const useApp = create<AppState>((set) => ({
       quotationPanelOpen: false,
       editingBookingId: null,
       editingBookingRef: null,
+      editingPromo: null,
     }),
   closeMenuBuilder: () =>
     set({
@@ -200,6 +216,7 @@ export const useApp = create<AppState>((set) => ({
       bookingSectionIndex: 0,
       editingBookingId: null,
       editingBookingRef: null,
+      editingPromo: null,
     }),
   setBookingStep: (s) => set({ bookingStep: s }),
   setBookingSectionIndex: (i) => set({ bookingSectionIndex: i }),
@@ -211,5 +228,11 @@ export const useApp = create<AppState>((set) => ({
   setToast: (t) => set({ toast: t }),
   setActiveQuotation: (q) =>
     set((s) => ({ activeQuotation: { ...s.activeQuotation, ...q } })),
-  resetQuotation: () => set({ activeQuotation: { ...emptyQuote }, editingBookingId: null, editingBookingRef: null }),
+  resetQuotation: () =>
+    set({
+      activeQuotation: { ...emptyQuote },
+      editingBookingId: null,
+      editingBookingRef: null,
+      editingPromo: null,
+    }),
 }));

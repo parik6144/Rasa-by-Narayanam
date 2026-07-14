@@ -1,6 +1,7 @@
 "use client";
 import { useEffect } from "react";
 import { useApp } from "@/store/app-store";
+import { isStaffRole } from "@/lib/permissions";
 import AdminLogin from "@/components/rasa/admin-login";
 import AdminDashboard from "@/components/rasa/admin-dashboard";
 import { useToast } from "@/hooks/use-toast";
@@ -50,9 +51,9 @@ export default function AdminPage() {
     }
   }, [toast, showToast, setToast]);
 
-  const isAdmin = !!user && user.role === "admin";
+  const isStaff = !!user && isStaffRole(user.role);
 
-  if (!sessionChecked && !isAdmin) {
+  if (!sessionChecked && !isStaff) {
     return (
       <div className="min-h-screen flex items-center justify-center" style={{ background: "linear-gradient(180deg,#1c101b,#251526)", color: "rgba(246,239,224,.62)" }}>
         Loading…
@@ -60,7 +61,7 @@ export default function AdminPage() {
     );
   }
 
-  if (!isAdmin) {
+  if (!isStaff) {
     return <AdminLogin />;
   }
 

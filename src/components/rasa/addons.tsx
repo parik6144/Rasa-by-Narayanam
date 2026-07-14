@@ -4,6 +4,7 @@ import { useCatalog } from "@/store/catalog-store";
 import type { Addon } from "@/lib/rasa-data";
 import { useApp } from "@/store/app-store";
 import { addonCategoryImage } from "@/lib/site-images";
+import { addonMinGuestsBadge, addonPricingNote } from "@/lib/addon-pricing";
 import { ArrowRight } from "lucide-react";
 
 export default function Addons() {
@@ -128,10 +129,16 @@ export default function Addons() {
                   </div>
                   <div className="text-[0.84rem] font-semibold whitespace-nowrap text-right" style={{ color: "var(--gold-bright)" }}>
                     ₹{a.price.toLocaleString("en-IN")}{a.priceType === "per_guest" ? "/guest" : a.priceType === "per_event" ? "/event" : a.priceType === "per_variety" ? "/variety" : ""}
+                    {addonMinGuestsBadge(a) && (
+                      <div className="text-[0.68rem] font-medium mt-0.5" style={{ color: "rgba(226,182,88,.9)" }}>{addonMinGuestsBadge(a)}</div>
+                    )}
                   </div>
                 </div>
                 {a.description && (
                   <div className="text-[0.86rem] font-light mt-1" style={{ color: "rgba(246,239,224,.62)" }}>{a.description}</div>
+                )}
+                {addonPricingNote(a) && (
+                  <div className="text-[0.78rem] font-light mt-1.5" style={{ color: "rgba(226,182,88,.75)" }}>{addonPricingNote(a)}</div>
                 )}
                 {a.choices && a.choices.length > 0 && (
                   <div className="mt-2 flex flex-wrap gap-1.5">

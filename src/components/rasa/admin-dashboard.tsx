@@ -3,20 +3,50 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { useRouter } from "next/navigation";
 import { useApp } from "@/store/app-store";
 import { CONFIG } from "@/lib/rasa-data";
-import { ArrowLeft, LogOut, Users, Calendar, IndianRupee, Bell, TrendingUp, MessageCircle, AlertCircle, UtensilsCrossed, X, Paperclip, Send } from "lucide-react";
+import {
+  canAccessTab,
+  hasPermission,
+  isStaffRole,
+  ROLE_LABELS,
+  type AdminTab,
+  type StaffRole,
+} from "@/lib/permissions";
+import { ArrowLeft, LogOut, Users, Calendar, IndianRupee, Bell, TrendingUp, MessageCircle, AlertCircle, UtensilsCrossed, X, Paperclip, Send, Shield, Tag } from "lucide-react";
 import AdminCatalog from "@/components/rasa/admin-catalog";
 import AdminLeads from "@/components/rasa/admin-leads";
+import AdminTeam from "@/components/rasa/admin-team";
+import AdminPayments from "@/components/rasa/admin-payments";
+import AdminPromos from "@/components/rasa/admin-promos";
+import PaymentHistory from "@/components/rasa/payment-history";
 
-interface KPIs { totalBookings: number; todayBookings: number; totalCustomers: number; totalRevenue: number; pendingPayments: number; activeEvents: number; }
+interface KPIs {
+  totalBookings: number;
+  todayBookings: number;
+  totalCustomers: number;
+  totalRevenue: number | null;
+  pendingPayments: number | null;
+  activeEvents: number;
+}
 interface AdminBooking {
   id: string; bookingRef: string; eventDate: string; venue: string; city: string; guests: number;
   status: string; total: number; advancePaid: number; balance: number;
   user: { name: string | null; email: string; phone: string | null };
   package: { name: string } | null;
+  payments?: {
+    id: string;
+    amount: number;
+    method: string;
+    status: string;
+    gateway: string;
+    note?: string | null;
+    proofUrl?: string | null;
+    createdAt: string;
+    confirmedAt?: string | null;
+  }[];
 }
 interface AdminCustomer {
   id: string; email: string; name: string | null; phone: string | null; city: string | null;
-  createdAt: string; bookingCount: number; ltv: number;
+  createdAt: string; bookingCount: number; ltv: number | null;
 }
 interface AdminNotif {
   id: string; type: string; title: string; body: string; link: string | null;
@@ -26,11 +56,12 @@ interface AdminNotif {
 export default function AdminDashboard() {
   const router = useRouter();
   const { user, setUser, setToast } = useApp();
-  const [tab, setTab] = useState<"overview" | "leads" | "bookings" | "customers" | "catalog" | "chat">("overview");
+  const [tab, setTab] = useState<AdminTab>("overview");
   const [kpis, setKpis] = useState<KPIs | null>(null);
   const [recentBookings, setRecentBookings] = useState<AdminBooking[]>([]);
   const [recentCustomers, setRecentCustomers] = useState<AdminCustomer[]>([]);
   const [allBookings, setAllBookings] = useState<AdminBooking[]>([]);
+  const [expandedBookingId, setExpandedBookingId] = useState<string | null>(null);
   const [allCustomers, setAllCustomers] = useState<AdminCustomer[]>([]);
   const [loading, setLoading] = useState(true);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -59,7 +90,7 @@ export default function AdminDashboard() {
   }, [setToast]);
 
   useEffect(() => {
-    if (!user || user.role !== "admin") return;
+    if (!user || !isStaffRole(user.role)) return;
     Promise.all([
       fetch("/api/admin/dashboard").then((r) => r.json()),
       fetch("/api/admin/bookings").then((r) => r.json()),
@@ -83,7 +114,15 @@ export default function AdminDashboard() {
   useEffect(() => {
     if (typeof window === "undefined") return;
     if (window.location.hash === "#leads") setTab("leads");
+    if (window.location.hash === "#payments") setTab("payments");
   }, []);
+
+  useEffect(() => {
+    if (!user || !isStaffRole(user.role)) return;
+    if (!canAccessTab(user.role, tab)) {
+      setTab("overview");
+    }
+  }, [user, tab]);
 
   const logout = async () => {
     await fetch("/api/auth/logout", { method: "POST", credentials: "include" });
@@ -121,12 +160,32 @@ export default function AdminDashboard() {
       setTab("leads");
       setShowNotifs(false);
     }
+    if (n.type === "payment_claim") {
+      setTab("payments");
+      setShowNotifs(false);
+    }
   };
 
-  if (!user || user.role !== "admin") return null;
+  if (!user || !isStaffRole(user.role)) return null;
 
   const fmtDate = (s: string) => new Date(s).toLocaleDateString("en-IN", { day: "numeric", month: "short", year: "numeric" });
-  const fmtMoney = (n: number) => "₹" + (n / 100).toLocaleString("en-IN");
+  const fmtMoney = (n: number | null | undefined) =>
+    n == null ? "—" : "₹" + (n / 100).toLocaleString("en-IN");
+  const showFinance = hasPermission(user.role, "overview.finance");
+  const showLtv = hasPermission(user.role, "customers.ltv");
+  const roleLabel = ROLE_LABELS[user.role as StaffRole] || "Staff";
+
+  const navTabs: { id: AdminTab; label: string; icon: typeof TrendingUp }[] = [
+    { id: "overview", label: "Overview", icon: TrendingUp },
+    { id: "catalog", label: "Packages & Menu", icon: UtensilsCrossed },
+    { id: "leads", label: "Leads", icon: Bell },
+    { id: "bookings", label: "Bookings", icon: Calendar },
+    { id: "customers", label: "Customers", icon: Users },
+    { id: "chat", label: "Live Chat", icon: MessageCircle },
+    { id: "team", label: "Team", icon: Shield },
+    { id: "payments", label: "Payments", icon: IndianRupee },
+    { id: "offers", label: "Offers", icon: Tag },
+  ].filter((t) => canAccessTab(user.role, t.id));
 
   const updateBookingStatus = async (id: string, status: string) => {
     const res = await fetch("/api/admin/bookings", {
@@ -146,23 +205,16 @@ export default function AdminDashboard() {
       <aside className="w-[240px] flex-shrink-0 flex flex-col" style={{ background: "linear-gradient(180deg,#180d17,#100809)", borderRight: "1px solid var(--paper-line)" }}>
         <div className="p-6">
           <img src={CONFIG.logo} alt="Rasa" className="logo-glow mb-2" style={{ height: "44px", width: "auto" }} />
-          <div className="text-[0.6rem] tracking-[0.4em] uppercase mt-1" style={{ color: "rgba(246,239,224,.62)" }}>Admin Console</div>
+          <div className="text-[0.6rem] tracking-[0.4em] uppercase mt-1" style={{ color: "rgba(246,239,224,.62)" }}>Staff Console · {roleLabel}</div>
         </div>
         <nav className="flex-1 px-3 space-y-1">
-          {[
-            { id: "overview", label: "Overview", icon: TrendingUp },
-            { id: "catalog", label: "Packages & Menu", icon: UtensilsCrossed },
-            { id: "leads", label: "Leads", icon: Bell },
-            { id: "bookings", label: "Bookings", icon: Calendar },
-            { id: "customers", label: "Customers", icon: Users },
-            { id: "chat", label: "Live Chat", icon: MessageCircle },
-          ].map((t) => {
+          {navTabs.map((t) => {
             const Icon = t.icon;
             const badge = t.id === "leads" ? (newLeadCount || unreadCount) : 0;
             return (
               <button
                 key={t.id}
-                onClick={() => setTab(t.id as typeof tab)}
+                onClick={() => setTab(t.id)}
                 className="w-full flex items-center gap-3 px-4 py-3 rounded-md text-sm font-medium transition-colors relative"
                 style={tab === t.id
                   ? { background: "rgba(198,152,58,.15)", color: "var(--gold-bright)" }
@@ -273,13 +325,13 @@ export default function AdminDashboard() {
               <>
                 <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-6 gap-4 mb-8">
                   {[
-                    { label: "Total Bookings", value: kpis.totalBookings, icon: Calendar, color: "var(--gold-bright)" },
-                    { label: "Today's Bookings", value: kpis.todayBookings, icon: TrendingUp, color: "var(--gold)" },
-                    { label: "Active Events", value: kpis.activeEvents, icon: Bell, color: "var(--anaar-bright)" },
-                    { label: "Customers", value: kpis.totalCustomers, icon: Users, color: "#AEBB55" },
-                    { label: "Total Revenue", value: fmtMoney(kpis.totalRevenue), icon: IndianRupee, color: "#1f7a5c" },
-                    { label: "Pending Payments", value: kpis.pendingPayments, icon: AlertCircle, color: "var(--anaar)" },
-                  ].map((stat) => {
+                    { label: "Total Bookings", value: kpis.totalBookings, icon: Calendar, color: "var(--gold-bright)", show: true },
+                    { label: "Today's Bookings", value: kpis.todayBookings, icon: TrendingUp, color: "var(--gold)", show: true },
+                    { label: "Active Events", value: kpis.activeEvents, icon: Bell, color: "var(--anaar-bright)", show: true },
+                    { label: "Customers", value: kpis.totalCustomers, icon: Users, color: "#AEBB55", show: true },
+                    { label: "Total Revenue", value: fmtMoney(kpis.totalRevenue), icon: IndianRupee, color: "#1f7a5c", show: showFinance },
+                    { label: "Pending Payments", value: kpis.pendingPayments ?? "—", icon: AlertCircle, color: "var(--anaar)", show: showFinance },
+                  ].filter((s) => s.show).map((stat) => {
                     const Icon = stat.icon;
                     return (
                       <div key={stat.label} className="glass-panel rounded-lg p-4">
@@ -359,15 +411,33 @@ export default function AdminDashboard() {
                             color: b.status === "confirmed" ? "#1f7a5c" : b.status === "completed" ? "var(--gold)" : "var(--anaar)",
                           }}>{b.status}</span>
                         </div>
-                        <div className="text-sm" style={{ color: "var(--ivory)" }}>{b.user.name || b.user.email} · {b.package?.name}</div>
+                        <div className="text-sm" style={{ color: "var(--ivory)" }}>
+                          Party: <b>{b.user.name || b.user.email}</b>
+                          {b.user.phone ? ` · ${b.user.phone}` : ""}
+                          {b.package?.name ? ` · ${b.package.name}` : ""}
+                        </div>
                         <div className="text-xs mt-1" style={{ color: "rgba(246,239,224,.62)" }}>
                           {fmtDate(b.eventDate)} · {b.guests} guests · {b.venue}, {b.city}
                         </div>
+                        {(b.payments?.length || 0) > 0 && (
+                          <div className="text-[0.7rem] mt-1" style={{ color: "var(--gold)" }}>
+                            {(b.payments || []).filter((p) => p.status === "success").length} successful ·{" "}
+                            {(b.payments || []).filter((p) => p.status === "pending").length} pending payment line(s)
+                          </div>
+                        )}
                       </div>
                       <div className="text-right">
                         <div className="font-display text-[1.3rem]" style={{ color: "var(--gold-bright)" }}>{fmtMoney(b.total)}</div>
                         <div className="text-xs" style={{ color: "rgba(246,239,224,.62)" }}>Paid {fmtMoney(b.advancePaid)} · Balance {fmtMoney(b.balance)}</div>
-                        <div className="flex gap-1 mt-2 justify-end">
+                        <div className="flex gap-1 mt-2 justify-end flex-wrap">
+                          <button
+                            type="button"
+                            onClick={() => setExpandedBookingId(expandedBookingId === b.id ? null : b.id)}
+                            className="px-2 py-1 rounded text-[0.66rem] font-semibold"
+                            style={{ color: "var(--gold-bright)", border: "1px solid var(--paper-line)" }}
+                          >
+                            {expandedBookingId === b.id ? "Hide payments" : "Payment log"}
+                          </button>
                           <button onClick={() => window.open(`/api/quotation-pdf?bookingId=${b.id}`, "_blank")} className="glossy-btn-gold px-2 py-1 rounded text-[0.66rem] font-semibold">
                             Quotation PDF
                           </button>
@@ -389,6 +459,25 @@ export default function AdminDashboard() {
                         </select>
                       </div>
                     </div>
+                    {expandedBookingId === b.id && (
+                      <div className="mt-4 pt-4 border-t" style={{ borderColor: "var(--paper-line)" }}>
+                        <PaymentHistory
+                          theme="dark"
+                          title={`Order ${b.bookingRef} — how ${b.user.name || "this party"} paid`}
+                          payments={(b.payments || []).map((p) => ({
+                            id: p.id,
+                            amount: p.amount,
+                            method: p.method,
+                            status: p.status,
+                            gateway: p.gateway,
+                            note: p.note,
+                            proofUrl: p.proofUrl,
+                            createdAt: p.createdAt,
+                            confirmedAt: p.confirmedAt,
+                          }))}
+                        />
+                      </div>
+                    )}
                   </div>
                 ))}
               </div>
@@ -408,7 +497,7 @@ export default function AdminDashboard() {
                 <table className="w-full text-sm">
                   <thead>
                     <tr style={{ background: "var(--ink-3)" }}>
-                      {["Name", "Email", "Phone", "City", "Bookings", "LTV"].map((h) => (
+                      {["Name", "Email", "Phone", "City", "Bookings", ...(showLtv ? ["LTV"] : [])].map((h) => (
                         <th key={h} className="text-left p-3 text-[0.72rem] tracking-[0.14em] uppercase font-bold" style={{ color: "var(--ivory)" }}>{h}</th>
                       ))}
                     </tr>
@@ -421,7 +510,9 @@ export default function AdminDashboard() {
                         <td className="p-3" style={{ color: "rgba(246,239,224,.62)" }}>{c.phone || "—"}</td>
                         <td className="p-3" style={{ color: "rgba(246,239,224,.62)" }}>{c.city || "—"}</td>
                         <td className="p-3" style={{ color: "var(--gold-bright)" }}>{c.bookingCount}</td>
-                        <td className="p-3 font-semibold" style={{ color: "var(--anaar-bright)" }}>{fmtMoney(c.ltv)}</td>
+                        {showLtv && (
+                          <td className="p-3 font-semibold" style={{ color: "var(--anaar-bright)" }}>{fmtMoney(c.ltv)}</td>
+                        )}
                       </tr>
                     ))}
                   </tbody>
@@ -444,6 +535,12 @@ export default function AdminDashboard() {
         )}
 
         {tab === "catalog" && <AdminCatalog />}
+
+        {tab === "team" && <AdminTeam />}
+
+        {tab === "payments" && <AdminPayments />}
+
+        {tab === "offers" && <AdminPromos />}
 
         {tab === "chat" && <AdminChat />}
       </main>

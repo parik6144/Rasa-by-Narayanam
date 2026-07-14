@@ -2,6 +2,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { db } from "@/lib/db";
 import { getCurrentUser } from "@/lib/auth";
+import {
+  computePromoDiscount,
+  findValidPromo,
+  promoDiscountNote,
+  subtotalFromGrossTotal,
+  totalsAfterDiscount,
+} from "@/lib/promo";
 
 export async function GET() {
   try {
@@ -10,7 +17,11 @@ export async function GET() {
     const bookings = await db.booking.findMany({
       where: { userId: user.id },
       orderBy: { eventDate: "desc" },
-      include: { package: true, payments: true },
+      include: {
+        package: true,
+        promoCode: true,
+        payments: { orderBy: { createdAt: "desc" } },
+      },
     });
     return NextResponse.json({ bookings });
   } catch (e: unknown) {
@@ -33,11 +44,11 @@ export async function POST(req: NextRequest) {
 
     const {
       packageId, eventDate, venue, city, guests, total, advancePaid,
-      menuSnapshot, addonsSnapshot, customDishes, occasion, notes,
+      menuSnapshot, addonsSnapshot, customDishes, occasion, notes, promoCode,
     } = body as {
       packageId?: string; eventDate?: string; venue?: string; city?: string; guests?: number;
       total?: number; advancePaid?: number; menuSnapshot?: unknown; addonsSnapshot?: unknown;
-      customDishes?: string[]; occasion?: string; notes?: string;
+      customDishes?: string[]; occasion?: string; notes?: string; promoCode?: string;
     };
 
     if (!eventDate || !venue || !city || !guests) {
@@ -52,48 +63,68 @@ export async function POST(req: NextRequest) {
       if (pkg) dbPkgId = pkg.id;
     }
 
-    const totalAmt = Math.round((total || 0) * 100);
-    const advance = Math.round((advancePaid || 0) * 100);
-    const gst = Math.round(totalAmt - totalAmt / 1.05);
-    const subtotal = totalAmt - gst;
+    void advancePaid;
+    const grossPaise = Math.round((total || 0) * 100);
+    let subtotalPre = subtotalFromGrossTotal(grossPaise);
+    let discount = 0;
+    let discountNote: string | null = null;
+    let promoCodeId: string | null = null;
+
+    if (promoCode) {
+      const promo = await findValidPromo(promoCode);
+      if (!promo) {
+        return NextResponse.json({ error: "Invalid or expired promo code" }, { status: 422 });
+      }
+      if (subtotalPre < (promo.minOrderPaise || 0)) {
+        return NextResponse.json(
+          {
+            error: `Minimum order ₹${Math.round((promo.minOrderPaise || 0) / 100).toLocaleString("en-IN")} for this promo`,
+          },
+          { status: 422 }
+        );
+      }
+      discount = computePromoDiscount(subtotalPre, promo);
+      discountNote = promoDiscountNote(promo);
+      promoCodeId = promo.id;
+    }
+
+    const priced = totalsAfterDiscount(subtotalPre, discount);
     const bookingRef = "RASA-" + Math.random().toString(36).slice(2, 8).toUpperCase();
 
-    const booking = await db.booking.create({
-      data: {
-        bookingRef,
-        userId: user.id,
-        packageId: dbPkgId,
-        eventDate: new Date(eventDate),
-        venue: String(venue).slice(0, 500),
-        city: String(city).slice(0, 120),
-        guests,
-        status: "confirmed",
-        subtotal,
-        gst,
-        total: totalAmt,
-        advancePaid: advance,
-        balance: Math.max(0, totalAmt - advance),
-        menuSnapshot: JSON.stringify(menuSnapshot || {}),
-        addonsSnapshot: JSON.stringify(addonsSnapshot || {}),
-        customDishes: customDishes ? JSON.stringify(customDishes) : null,
-        occasion: occasion || null,
-        notes: notes || null,
-      },
-    });
-
-    if (advance > 0) {
-      await db.payment.create({
+    const booking = await db.$transaction(async (tx) => {
+      if (promoCodeId) {
+        await tx.promoCode.update({
+          where: { id: promoCodeId },
+          data: { usedCount: { increment: 1 } },
+        });
+      }
+      return tx.booking.create({
         data: {
-          bookingId: booking.id,
+          bookingRef,
           userId: user.id,
-          amount: advance,
-          method: "upi",
-          status: "success",
-          gateway: "mock",
-          gatewayTxn: "MOCK-" + Date.now(),
+          packageId: dbPkgId,
+          eventDate: new Date(eventDate),
+          venue: String(venue).slice(0, 500),
+          city: String(city).slice(0, 120),
+          guests,
+          status: "confirmed",
+          subtotal: priced.subtotal,
+          discount: priced.discount,
+          discountNote,
+          promoCodeId,
+          gst: priced.gst,
+          total: priced.total,
+          advancePaid: 0,
+          balance: priced.total,
+          menuSnapshot: JSON.stringify(menuSnapshot || {}),
+          addonsSnapshot: JSON.stringify(addonsSnapshot || {}),
+          customDishes: customDishes ? JSON.stringify(customDishes) : null,
+          occasion: occasion || null,
+          notes: notes || null,
         },
+        include: { promoCode: true },
       });
-    }
+    });
 
     return NextResponse.json({ booking });
   } catch (e: unknown) {

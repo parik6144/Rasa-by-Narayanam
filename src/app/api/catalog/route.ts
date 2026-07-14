@@ -71,6 +71,7 @@ export async function GET() {
         category: a.category,
         nv: a.isNv || undefined,
         choices,
+        guestRange: a.guestRange || 0,
       };
     });
 

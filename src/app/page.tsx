@@ -55,6 +55,34 @@ export default function Home() {
     }
   }, [toast, showToast, setToast]);
 
+  // Stripe Checkout return — confirm session if webhook was missed
+  useEffect(() => {
+    if (typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("paid") !== "1") return;
+    const sessionId = params.get("session_id");
+    if (!sessionId) return;
+    fetch("/api/payments/stripe/confirm", {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ sessionId }),
+    })
+      .then(async (r) => {
+        const d = await r.json().catch(() => ({}));
+        if (r.ok) setToast("Payment received — thank you!");
+        else if (d.error) setToast(d.error);
+      })
+      .catch(() => {})
+      .finally(() => {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("paid");
+        url.searchParams.delete("session_id");
+        url.searchParams.delete("bookingId");
+        window.history.replaceState({}, "", url.pathname + url.search + url.hash);
+      });
+  }, [setToast]);
+
   return (
     <div className="min-h-screen flex flex-col">
       {view === "landing" && (

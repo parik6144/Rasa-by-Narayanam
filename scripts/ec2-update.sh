@@ -28,6 +28,22 @@ sudo mysql rasa_platform -e "ALTER TABLE booking MODIFY COLUMN menuSnapshot LONG
 sudo mysql rasa_platform -e "ALTER TABLE booking MODIFY COLUMN addonsSnapshot LONGTEXT NULL;" 2>/dev/null || true
 sudo mysql rasa_platform -e "ALTER TABLE booking MODIFY COLUMN customDishes LONGTEXT NULL;" 2>/dev/null || true
 sudo mysql rasa_platform -e "ALTER TABLE booking MODIFY COLUMN notes TEXT NULL;" 2>/dev/null || true
+# Addon min billable guest range
+sudo mysql rasa_platform -e "ALTER TABLE addon ADD COLUMN guestRange INT NOT NULL DEFAULT 0;" 2>/dev/null || true
+sudo mysql rasa_platform -e "UPDATE addon SET guestRange = 500 WHERE guestRange = 0;" 2>/dev/null || true
+# Staff RBAC — inactive staff cannot login
+sudo mysql rasa_platform -e "ALTER TABLE user ADD COLUMN isActive BOOLEAN NOT NULL DEFAULT TRUE;" 2>/dev/null || true
+# Payments — Stripe / UPI claim fields + site settings
+sudo mysql rasa_platform -e "ALTER TABLE payment ADD COLUMN proofUrl VARCHAR(191) NULL;" 2>/dev/null || true
+sudo mysql rasa_platform -e "ALTER TABLE payment ADD COLUMN note TEXT NULL;" 2>/dev/null || true
+sudo mysql rasa_platform -e "ALTER TABLE payment ADD COLUMN confirmedBy VARCHAR(191) NULL;" 2>/dev/null || true
+sudo mysql rasa_platform -e "ALTER TABLE payment ADD COLUMN confirmedAt DATETIME(3) NULL;" 2>/dev/null || true
+sudo mysql rasa_platform -e "ALTER TABLE payment MODIFY COLUMN status VARCHAR(191) NOT NULL DEFAULT 'pending';" 2>/dev/null || true
+sudo mysql rasa_platform -e "CREATE TABLE IF NOT EXISTS sitesettings (id VARCHAR(191) NOT NULL, upiId VARCHAR(191) NULL, upiQrUrl VARCHAR(191) NULL, paymentsEnabled BOOLEAN NOT NULL DEFAULT TRUE, updatedAt DATETIME(3) NOT NULL, PRIMARY KEY (id)) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>/dev/null || true
+sudo mysql rasa_platform -e "INSERT IGNORE INTO sitesettings (id, upiId, upiQrUrl, paymentsEnabled, updatedAt) VALUES ('default', NULL, NULL, TRUE, NOW(3));" 2>/dev/null || true
+# Promo codes
+sudo mysql rasa_platform -e "CREATE TABLE IF NOT EXISTS promocode (id VARCHAR(191) NOT NULL, code VARCHAR(191) NOT NULL, label VARCHAR(191) NOT NULL, type VARCHAR(191) NOT NULL, value INT NOT NULL, minOrderPaise INT NOT NULL DEFAULT 0, maxDiscountPaise INT NULL, startsAt DATETIME(3) NULL, endsAt DATETIME(3) NULL, usageLimit INT NULL, usedCount INT NOT NULL DEFAULT 0, isActive BOOLEAN NOT NULL DEFAULT TRUE, createdBy VARCHAR(191) NULL, createdAt DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3), updatedAt DATETIME(3) NOT NULL, PRIMARY KEY (id), UNIQUE KEY promocode_code_key (code)) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;" 2>/dev/null || true
+sudo mysql rasa_platform -e "ALTER TABLE booking ADD COLUMN promoCodeId VARCHAR(191) NULL;" 2>/dev/null || true
 
 echo "== pause SelfAlgo for build RAM =="
 pm2 stop selftradealgo || true

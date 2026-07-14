@@ -1,7 +1,8 @@
 // Admin: list + update leads (status, follow-ups, notes, schedule, files)
 import { NextResponse } from "next/server";
 import { db } from "@/lib/db";
-import { requireAdmin } from "@/lib/auth";
+import { requirePermission } from "@/lib/auth";
+import { authErrorResponse } from "@/lib/api-auth";
 
 export type LeadFile = {
   name: string;
@@ -31,9 +32,10 @@ function parseJson<T>(raw: string | null, fallback: T): T {
 
 export async function GET() {
   try {
-    await requireAdmin();
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    await requirePermission("leads.write");
+  } catch (e) {
+    const { status, body } = authErrorResponse(e);
+    return NextResponse.json(body, { status });
   }
   const leads = await db.lead.findMany({
     orderBy: [{ createdAt: "desc" }],
@@ -45,9 +47,10 @@ export async function GET() {
 export async function PATCH(req: Request) {
   let admin;
   try {
-    admin = await requireAdmin();
-  } catch {
-    return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
+    admin = await requirePermission("leads.write");
+  } catch (e) {
+    const { status, body } = authErrorResponse(e);
+    return NextResponse.json(body, { status });
   }
 
   const body = await req.json();

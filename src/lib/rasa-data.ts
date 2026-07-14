@@ -21,6 +21,8 @@ export interface Addon {
   category: string;
   nv?: boolean;
   choices?: string[];
+  /** Min billable guests for per_guest; 0 = actual guests */
+  guestRange?: number;
 }
 
 export const PACKAGES: Package[] = [
