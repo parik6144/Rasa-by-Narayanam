@@ -13,11 +13,34 @@ export type AddonPriceInput = {
   priceType?: string | null;
   guestRange?: number | null;
   name?: string | null;
+  id?: string | null;
   /** Selected variety name(s) — used for per_variety quantity */
   choice?: AddonChoiceValue;
   /** Explicit variety count override (defaults from choice list) */
   varietyCount?: number | null;
 };
+
+/** Formal policy shown during booking / review / quotation. */
+export const ADDON_PRICING_POLICY_TITLE = "Add-on Pricing Policy";
+
+export const ADDON_PRICING_POLICY_POINTS = [
+  {
+    label: "Package Price",
+    text: "Calculated only on your actual guest count.",
+  },
+  {
+    label: "Per Guest Add-ons",
+    text: "Billed on a minimum of 500 guests. If your guest count exceeds 500, charges are calculated on the actual number of guests.",
+  },
+  {
+    label: "Per Variety Add-ons",
+    text: "Billed on a minimum of 500 guests per selected variety. If your guest count exceeds 500, charges are calculated on the actual number of guests for each selected variety.",
+  },
+  {
+    label: "Per Event Add-ons",
+    text: "The listed price includes service for up to 500 guests. If your guest count exceeds 500, additional guests are charged on a pro-rata basis. (Welcome Hostesses are always charged as a fixed per-event fee and are not billed pro-rata.)",
+  },
+] as const;
 
 /** Normalize stored choice to a list of selected variety names. */
 export function normalizeAddonChoices(choice: AddonChoiceValue): string[] {
@@ -25,7 +48,6 @@ export function normalizeAddonChoices(choice: AddonChoiceValue): string[] {
     return choice.map((c) => String(c || "").trim()).filter(Boolean);
   }
   if (typeof choice === "string" && choice.trim()) {
-    // Comma-separated legacy snapshots
     if (choice.includes(" · ")) {
       return choice.split(" · ").map((s) => s.trim()).filter(Boolean);
     }
@@ -41,6 +63,12 @@ export function varietyQty(addon: AddonPriceInput): number {
   }
   const n = normalizeAddonChoices(addon.choice).length;
   return Math.max(1, n);
+}
+
+/** Welcome hostess add-ons stay fixed per-event (never pro-rata). */
+export function isFixedHostessAddon(addon: AddonPriceInput): boolean {
+  const hay = `${addon.id || ""} ${addon.name || ""}`.toLowerCase();
+  return hay.includes("hostess");
 }
 
 /** True when guest min floor applies to this price type. */
@@ -70,10 +98,12 @@ function unitLabel(priceType?: string | null): string {
  * Line total in the same units as `price` (rupees or paise — caller decides).
  *
  * Formal rules:
- * - per_event / flat: charge unit price once (never × guests / min)
  * - per_guest: unit × max(actualGuests, guestRange)
  * - per_variety: unit × varietyCount × max(actualGuests, guestRange)
- *   e.g. ₹54 × 5 shakes × 500 min = ₹1,35,000
+ * - per_event: listed price covers up to guestRange (default 500);
+ *   above that → pro-rata = unit × guests / range
+ * - hostess (per_event): always flat unit price
+ * - flat / unknown: unit once
  */
 export function addonLineTotal(addon: AddonPriceInput, guests: number): number {
   const unit = Number(addon.price) || 0;
@@ -90,13 +120,24 @@ export function addonLineTotal(addon: AddonPriceInput, guests: number): number {
     return unit * qty * (range > 0 ? billed : actual);
   }
 
-  // per_event | flat | unknown — single charge
+  if (addon.priceType === "per_event") {
+    if (isFixedHostessAddon(addon)) return unit;
+    const slab = range > 0 ? range : 500;
+    if (actual <= slab) return unit;
+    return Math.round((unit * actual) / slab);
+  }
+
+  // flat | unknown — single charge
   return unit;
 }
 
 /** Short badge for catalogs / lists when a minimum guest slab applies. */
 export function addonMinGuestsBadge(addon: AddonPriceInput): string | null {
   const range = Math.max(0, Number(addon.guestRange) || 0);
+  if (addon.priceType === "per_event") {
+    if (isFixedHostessAddon(addon)) return "Fixed / event";
+    return `Up to ${range > 0 ? range : 500} guests`;
+  }
   if (range <= 0 || !addonUsesGuestMinimum(addon.priceType)) return null;
   return `Min ${range} guests`;
 }
@@ -109,10 +150,26 @@ export function addonPricingNote(addon: AddonPriceInput, guests?: number | null)
   const unit = Number(addon.price) || 0;
   const unitFmt = unit.toLocaleString("en-IN");
   const range = Math.max(0, Number(addon.guestRange) || 0);
-  const rangeFmt = range.toLocaleString("en-IN");
+  const rangeFmt = (range > 0 ? range : 500).toLocaleString("en-IN");
+  const slab = range > 0 ? range : 500;
 
-  if (addon.priceType === "per_event" || addon.priceType === "flat") {
-    return `Flat ₹${unitFmt} per event — charged once, not multiplied by guests.`;
+  if (addon.priceType === "flat") {
+    return `Flat ₹${unitFmt} — charged once.`;
+  }
+
+  if (addon.priceType === "per_event") {
+    if (isFixedHostessAddon(addon)) {
+      return `Welcome Hostess: fixed ₹${unitFmt} per event — not billed pro-rata.`;
+    }
+    if (guests != null && Number.isFinite(Number(guests)) && Number(guests) > 0) {
+      const actual = Math.max(0, Number(guests) || 0);
+      const line = addonLineTotal(addon, actual);
+      if (actual > slab) {
+        return `Listed ₹${unitFmt} covers up to ${rangeFmt} guests. Your party has ${actual.toLocaleString("en-IN")} — pro-rata ₹${unitFmt} × ${actual.toLocaleString("en-IN")} ÷ ${rangeFmt} = ₹${line.toLocaleString("en-IN")}.`;
+      }
+      return `Listed ₹${unitFmt} includes service for up to ${rangeFmt} guests (your party: ${actual.toLocaleString("en-IN")}).`;
+    }
+    return `Listed ₹${unitFmt} includes service for up to ${rangeFmt} guests; above that, charged pro-rata.`;
   }
 
   if (addon.priceType === "per_guest") {
@@ -133,7 +190,7 @@ export function addonPricingNote(addon: AddonPriceInput, guests?: number | null)
       }
       return `₹${unitFmt}/guest × ${billed.toLocaleString("en-IN")} guests = ₹${line.toLocaleString("en-IN")}.`;
     }
-    return `₹${unitFmt}/guest with a minimum of ${rangeFmt} guests (₹${unitFmt} × ${rangeFmt} = ₹${(unit * range).toLocaleString("en-IN")}), even if your count is lower.`;
+    return `Billed on a minimum of ${rangeFmt} guests (₹${unitFmt} × ${rangeFmt} = ₹${(unit * range).toLocaleString("en-IN")}). Above ${rangeFmt}, billed on actual guests.`;
   }
 
   if (addon.priceType === "per_variety") {
@@ -154,11 +211,11 @@ export function addonPricingNote(addon: AddonPriceInput, guests?: number | null)
       const line = unit * qty * billed;
       const pickNote = picks.length > 0 ? ` (selected: ${picks.join(", ")})` : " — pick varieties below";
       if (billed > actual) {
-        return `Note: your guest count is ${actual.toLocaleString("en-IN")}, but min chargeable is ${rangeFmt}. Calculation: ₹${unitFmt} × ${qty} variety${qty > 1 ? "ies" : ""} × ${billed.toLocaleString("en-IN")} = ₹${line.toLocaleString("en-IN")}${pickNote}.`;
+        return `Note: your guest count is ${actual.toLocaleString("en-IN")}, but min chargeable is ${rangeFmt} per variety. Calculation: ₹${unitFmt} × ${qty} × ${billed.toLocaleString("en-IN")} = ₹${line.toLocaleString("en-IN")}${pickNote}.`;
       }
       return `₹${unitFmt} × ${qtyLabel} × ${billed.toLocaleString("en-IN")} guests = ₹${line.toLocaleString("en-IN")}${pickNote}.`;
     }
-    return `₹${unitFmt} per variety × varieties selected × min ${rangeFmt} guests (e.g. 1 variety = ₹${(unit * range).toLocaleString("en-IN")}; 5 varieties = ₹${(unit * 5 * range).toLocaleString("en-IN")}).`;
+    return `Billed on a minimum of ${rangeFmt} guests per selected variety. Above ${rangeFmt}, billed on actual guests for each variety.`;
   }
 
   return null;
@@ -166,8 +223,19 @@ export function addonPricingNote(addon: AddonPriceInput, guests?: number | null)
 
 /** Estimated line label for addon cards when guest count is known. */
 export function addonEstimatedLineLabel(addon: AddonPriceInput, guests: number): string | null {
-  if (addon.priceType === "per_event" || addon.priceType === "flat") {
-    return `₹${(Number(addon.price) || 0).toLocaleString("en-IN")} flat / event`;
+  if (addon.priceType === "flat") {
+    return `₹${(Number(addon.price) || 0).toLocaleString("en-IN")} flat`;
+  }
+  if (addon.priceType === "per_event") {
+    const line = addonLineTotal(addon, guests);
+    if (isFixedHostessAddon(addon)) {
+      return `₹${line.toLocaleString("en-IN")} fixed / event`;
+    }
+    const slab = Math.max(0, Number(addon.guestRange) || 0) || 500;
+    if (guests > slab) {
+      return `Est. ₹${line.toLocaleString("en-IN")} (pro-rata)`;
+    }
+    return `₹${line.toLocaleString("en-IN")} / event (up to ${slab.toLocaleString("en-IN")})`;
   }
   if (!addonScalesWithGuests(addon.priceType)) return null;
   const line = addonLineTotal(addon, guests);

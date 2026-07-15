@@ -19,6 +19,7 @@ import {
 } from "lucide-react";
 import PayBookingPanel from "@/components/rasa/pay-booking-panel";
 import PromoCodeInput from "@/components/rasa/promo-code-input";
+import AddonPricingPolicy from "@/components/rasa/addon-pricing-policy";
 
 const STEP_META: { id: BookingStep; label: string; hint: string }[] = [
   { id: "menu", label: "1. Menu", hint: "Pick dishes for each course" },
@@ -612,21 +613,12 @@ export default function BookingWizard() {
             <p className="text-[1rem] mb-2" style={{ color: "var(--on-ivory-dim)" }}>
               Your package is the foundation. These extras are what guests photograph and remember — add what fits your evening, or skip.
             </p>
-            <div className="rounded-lg p-3.5 mb-5 text-sm flex items-start gap-2.5" style={{ background: "rgba(198,152,58,.12)", border: "1px solid rgba(198,152,58,.35)" }}>
-              <Info className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: "var(--gold)" }} />
-              <div>
-                <div className="font-semibold mb-1" style={{ color: "#2c1a26" }}>
-                  How add-on pricing works
-                </div>
-                <p style={{ color: "var(--on-ivory-dim)" }}>
-                  You currently have <b>{activeQuotation.guests.toLocaleString("en-IN")} guests</b>.
-                  {" "}<b>Per guest</b> and <b>per variety</b> extras bill on{" "}
-                  <b>rate × max(your guests, minimum)</b> — e.g. ₹110/guest with min 500 → ₹55,000 even for 100 guests.
-                  {" "}For <b>per variety</b>, also × how many flavours you pick (₹54 × 5 shakes × 500 = ₹1,35,000).
-                  {" "}<b>Per event</b> stays a flat one-time charge (e.g. hostess ₹6,600 — not × guests).
-                  {" "}Package price always uses your real count only. Selected: <b>{selectedAddons.length}</b> extra(s).
-                </p>
-              </div>
+            <div className="mb-5">
+              <AddonPricingPolicy
+                theme="light"
+                guests={activeQuotation.guests}
+                selectedCount={selectedAddons.length}
+              />
             </div>
 
             {inspire.length > 0 && (
@@ -1078,25 +1070,12 @@ export default function BookingWizard() {
                   </div>
                 </div>
 
-                <div
-                  className="relative mb-4 rounded-lg p-3.5 flex gap-2.5 items-start"
-                  style={{
-                    background: "rgba(198,152,58,.14)",
-                    border: "1px solid rgba(226,182,88,.4)",
-                  }}
-                >
-                  <Info className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: "var(--gold-bright)" }} />
-                  <div className="text-[0.84rem] leading-relaxed" style={{ color: "rgba(246,239,224,.88)" }}>
-                    <div className="font-semibold mb-1" style={{ color: "var(--gold-bright)" }}>
-                      How these extras are billed
-                    </div>
-                    <p>
-                      Your party is <b style={{ color: "var(--ivory)" }}>{activeQuotation.guests.toLocaleString("en-IN")} guests</b>.
-                      {" "}<b style={{ color: "var(--ivory)" }}>Per guest</b> / <b style={{ color: "var(--ivory)" }}>per variety</b>: rate × max(guests, minimum).
-                      {" "}Per variety also × flavours selected. <b style={{ color: "var(--ivory)" }}>Per event</b> stays flat (one charge).
-                      {" "}Package always uses your real guest count only.
-                    </p>
-                  </div>
+                <div className="relative mb-4">
+                  <AddonPricingPolicy
+                    theme="dark"
+                    guests={activeQuotation.guests}
+                    selectedCount={selectedAddons.length}
+                  />
                 </div>
 
                 <div className="relative space-y-3">
@@ -1166,7 +1145,12 @@ export default function BookingWizard() {
                                   : `× ${billed.toLocaleString("en-IN")} guests`}
                               </>
                             )}
-                            {(a.priceType === "per_event" || a.priceType === "flat") && <> · flat / event</>}
+                            {a.priceType === "flat" && <> · flat</>}
+                            {a.priceType === "per_event" && (
+                              a.name?.toLowerCase().includes("hostess")
+                                ? <> · fixed / event</>
+                                : <> · per event (pro-rata above min)</>
+                            )}
                           </div>
                           {note && (
                             <div className="text-[0.72rem] mt-1" style={{ color: "rgba(226,182,88,.9)" }}>

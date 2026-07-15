@@ -5,6 +5,7 @@ import { useCatalog } from "@/store/catalog-store";
 import { CONFIG } from "@/lib/rasa-data";
 import { parseSelection, isSectionComplete } from "@/lib/selection";
 import { addonLineTotal, addonMinGuestsBadge, addonPricingNote, addonEstimatedLineLabel, normalizeAddonChoices } from "@/lib/addon-pricing";
+import AddonPricingPolicy from "@/components/rasa/addon-pricing-policy";
 import { X, Plus, Check, ArrowRight, ArrowLeft, Minus, Sparkles, Share2, Info } from "lucide-react";
 
 export default function MenuBuilder() {
@@ -338,11 +339,15 @@ export default function MenuBuilder() {
 
           {activeTab === "addons" && (
             <div className="py-5">
-              <div className="mb-4 p-3 rounded-md" style={{ background: "rgba(198,152,58,.08)", border: "1px solid var(--paper-line)" }}>
-                <p className="text-[0.82rem]" style={{ color: "var(--on-ivory-dim)" }}>
+              <div className="mb-4">
+                <p className="text-[0.82rem] mb-3" style={{ color: "var(--on-ivory-dim)" }}>
                   <b style={{ color: "#2c1a26" }}>Add-ons are optional.</b> Live stations, regional thalis, mithai, frozen theatre, and mansahari — pick any on top of your package.
-                  {" "}Per guest / per variety extras bill on <b style={{ color: "#2c1a26" }}>rate × max({activeQuotation.guests} guests, min)</b>; per variety also × flavours picked. Per event stays flat once.
                 </p>
+                <AddonPricingPolicy
+                  theme="light"
+                  guests={activeQuotation.guests}
+                  selectedCount={selectedAddons.length}
+                />
               </div>
               <div className="flex flex-wrap gap-2 mb-4">
                 {addonCategories.map((c) => (

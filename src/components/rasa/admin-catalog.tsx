@@ -310,9 +310,9 @@ export default function AdminCatalog() {
           <div className="mb-4 p-3 rounded-lg text-sm flex items-start gap-2" style={{ background: "rgba(198,152,58,.1)", border: "1px solid rgba(198,152,58,.28)" }}>
             <span style={{ color: "var(--gold-bright)" }}>ⓘ</span>
             <span style={{ color: "rgba(246,239,224,.78)" }}>
-              <b style={{ color: "var(--ivory)" }}>Per guest / per variety</b> bill on
-              <b style={{ color: "var(--gold-bright)" }}> rate × max(guests, guest range)</b>
-              {" "}(per variety also × flavours picked). <b style={{ color: "var(--ivory)" }}>Per event</b> stays flat once.
+              <b style={{ color: "var(--ivory)" }}>Policy:</b> package = actual guests;
+              {" "}per guest / per variety = min 500 (then actual if higher);
+              {" "}per event = listed price up to 500, pro-rata above (hostess always fixed).
               Edit any card to change the range (e.g. 500).
             </span>
           </div>

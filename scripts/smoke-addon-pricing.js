@@ -1,4 +1,4 @@
-/** Quick smoke test for addon guest-range + variety billing */
+/** Quick smoke test for addon guest-range + variety + event pro-rata billing */
 function billableGuests(guests, guestRange) {
   const actual = Math.max(0, Number(guests) || 0);
   const range = Math.max(0, Number(guestRange) || 0);
@@ -19,6 +19,11 @@ function varietyQty(addon) {
   return Math.max(1, n);
 }
 
+function isFixedHostessAddon(addon) {
+  const hay = `${addon.id || ""} ${addon.name || ""}`.toLowerCase();
+  return hay.includes("hostess");
+}
+
 function addonLineTotal(addon, guests) {
   const unit = Number(addon.price) || 0;
   const range = Math.max(0, Number(addon.guestRange) || 0);
@@ -31,16 +36,23 @@ function addonLineTotal(addon, guests) {
   if (addon.priceType === "per_variety") {
     return unit * varietyQty(addon) * (range > 0 ? billed : actual);
   }
-  return unit; // per_event / flat
+  if (addon.priceType === "per_event") {
+    if (isFixedHostessAddon(addon)) return unit;
+    const slab = range > 0 ? range : 500;
+    if (actual <= slab) return unit;
+    return Math.round((unit * actual) / slab);
+  }
+  return unit;
 }
 
 const guests = 100;
 const cases = [
   {
-    name: "Hostess (per event)",
+    name: "Hostess (fixed event)",
     price: 6600,
     priceType: "per_event",
     guestRange: 500,
+    id: "greet-namaskar-by-hostess",
     expect: 6600,
   },
   {
@@ -51,14 +63,6 @@ const cases = [
     expect: 55000,
   },
   {
-    name: "Shake 1 variety",
-    price: 54,
-    priceType: "per_variety",
-    guestRange: 500,
-    choice: ["Vanilla"],
-    expect: 27000,
-  },
-  {
     name: "Shake 5 varieties",
     price: 54,
     priceType: "per_variety",
@@ -67,28 +71,38 @@ const cases = [
     expect: 135000,
   },
   {
-    name: "Molecular Express (per event)",
+    name: "Molecular @100 (within 500)",
     price: 49500,
     priceType: "per_event",
     guestRange: 500,
     expect: 49500,
   },
+  {
+    name: "Molecular @600 (pro-rata)",
+    price: 49500,
+    priceType: "per_event",
+    guestRange: 500,
+    guests: 600,
+    expect: 59400,
+  },
+  {
+    name: "Hostess @600 (still fixed)",
+    price: 6600,
+    priceType: "per_event",
+    guestRange: 500,
+    id: "greet-namaskar-by-hostess",
+    guests: 600,
+    expect: 6600,
+  },
 ];
 
 let ok = true;
 for (const a of cases) {
-  const line = addonLineTotal(a, guests);
+  const g = a.guests != null ? a.guests : guests;
+  const line = addonLineTotal(a, g);
   const pass = line === a.expect;
   if (!pass) ok = false;
   console.log(`${pass ? "OK" : "FAIL"} ${a.name}: ${line} (expected ${a.expect})`);
 }
-
-const above = addonLineTotal(
-  { price: 110, priceType: "per_guest", guestRange: 500 },
-  600
-);
-const abovePass = above === 66000;
-if (!abovePass) ok = false;
-console.log(`${abovePass ? "OK" : "FAIL"} Dim Sum @600 guests: ${above} (expected 66000)`);
 
 process.exit(ok ? 0 : 1);

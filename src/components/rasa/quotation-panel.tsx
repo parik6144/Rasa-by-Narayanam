@@ -6,6 +6,7 @@ import { useCatalog } from "@/store/catalog-store";
 import { addonLineTotal, addonPricingNote, formatAddonChoiceLabel, varietyQty } from "@/lib/addon-pricing";
 import PromoCodeInput from "@/components/rasa/promo-code-input";
 import PayBookingPanel from "@/components/rasa/pay-booking-panel";
+import AddonPricingPolicy from "@/components/rasa/addon-pricing-policy";
 import { X, ArrowRight, CheckCircle, Calendar, MapPin, Users, FileText, Share2 } from "lucide-react";
 
 export default function QuotationPanel() {
@@ -197,6 +198,13 @@ export default function QuotationPanel() {
             {activeQuotation.selectedAddons.length > 0 && (
               <div className="py-4 border-t" style={{ borderColor: "rgba(58,39,51,.14)" }}>
                 <h4 className="font-display text-[1.2rem] mb-2" style={{ color: "#2c1a26" }}>Add-ons</h4>
+                <div className="mb-3">
+                  <AddonPricingPolicy
+                    theme="light"
+                    guests={activeQuotation.guests}
+                    selectedCount={activeQuotation.selectedAddons.length}
+                  />
+                </div>
                 {activeQuotation.selectedAddons.map((id) => {
                   const a = getAddon(id);
                   if (!a) return null;
