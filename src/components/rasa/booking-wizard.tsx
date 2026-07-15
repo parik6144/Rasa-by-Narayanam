@@ -8,7 +8,11 @@ import {
   nextStepHint, pickInspireAddons, temptForAddon, fmtShortDate, editCutoffDate,
 } from "@/lib/booking-journey";
 import { packageImage } from "@/lib/site-images";
-import { addonLineTotal, billableGuests, addonUsesGuestFloor, addonMinGuestsBadge, addonPricingNote } from "@/lib/addon-pricing";
+import {
+  addonLineTotal, billableGuests, addonUsesGuestFloor, addonMinGuestsBadge,
+  addonPricingNote, addonEstimatedLineLabel, addonScalesWithGuests,
+  normalizeAddonChoices, formatAddonChoiceLabel, varietyQty,
+} from "@/lib/addon-pricing";
 import {
   ArrowLeft, ArrowRight, Check, Plus, Minus, Sparkles, Share2,
   Calendar, MapPin, Users, FileText, CheckCircle, AlertCircle, Info, Flame, Compass, Trash2, Pencil,
@@ -99,7 +103,10 @@ export default function BookingWizard() {
     const addonsTotal = activeQuotation.selectedAddons.reduce((sum, id) => {
       const a = getAddon(id);
       if (!a) return sum;
-      return sum + addonLineTotal(a, guests);
+      return sum + addonLineTotal(
+        { ...a, choice: activeQuotation.addonChoices[id] },
+        guests
+      );
     }, 0);
     const gross = pkgTotal + addonsTotal + Math.round((pkgTotal + addonsTotal) * 0.05);
     let cancelled = false;
@@ -126,6 +133,7 @@ export default function BookingWizard() {
     pkg,
     activeQuotation.guests,
     activeQuotation.selectedAddons,
+    activeQuotation.addonChoices,
     getAddon,
   ]);
 
@@ -165,7 +173,10 @@ export default function BookingWizard() {
     const addonsTotal = selectedAddons.reduce((sum, id) => {
       const a = getAddon(id);
       if (!a) return sum;
-      return sum + addonLineTotal(a, activeQuotation.guests);
+      return sum + addonLineTotal(
+        { ...a, choice: activeQuotation.addonChoices[id] },
+        activeQuotation.guests
+      );
     }, 0);
     const subtotal = pkgTotal + addonsTotal;
     const gst = Math.round(subtotal * 0.05);
@@ -189,10 +200,39 @@ export default function BookingWizard() {
   };
 
   const toggleAddon = (id: string) => {
+    if (selectedAddons.includes(id)) {
+      const nextChoices = { ...activeQuotation.addonChoices };
+      delete nextChoices[id];
+      setActiveQuotation({
+        selectedAddons: selectedAddons.filter((a) => a !== id),
+        addonChoices: nextChoices,
+      });
+    } else {
+      setActiveQuotation({ selectedAddons: [...selectedAddons, id] });
+    }
+  };
+
+  /** Single-pick for choose-any items; multi-pick for per_variety. */
+  const toggleAddonChoice = (addonId: string, choice: string, multi: boolean) => {
+    const cur = activeQuotation.addonChoices[addonId];
+    let next: string | string[] | null;
+    if (multi) {
+      const list = normalizeAddonChoices(cur);
+      next = list.includes(choice)
+        ? list.filter((c) => c !== choice)
+        : [...list, choice];
+      if (Array.isArray(next) && next.length === 0) next = [];
+    } else {
+      next = cur === choice ? null : choice;
+    }
     setActiveQuotation({
-      selectedAddons: selectedAddons.includes(id)
-        ? selectedAddons.filter((a) => a !== id)
-        : [...selectedAddons, id],
+      selectedAddons: selectedAddons.includes(addonId)
+        ? selectedAddons
+        : [...selectedAddons, addonId],
+      addonChoices: {
+        ...activeQuotation.addonChoices,
+        [addonId]: next,
+      },
     });
   };
 
@@ -262,13 +302,16 @@ export default function BookingWizard() {
     setErr(null);
     const addonsSnapshot = selectedAddons.map((id) => {
       const a = getAddon(id);
+      const choice = activeQuotation.addonChoices[id] ?? null;
+      const priced = { ...a, choice };
       return {
         id,
         name: a?.name,
         price: a?.price,
         priceType: a?.priceType,
         guestRange: a?.guestRange || 0,
-        choice: activeQuotation.addonChoices[id] || null,
+        choice,
+        varietyCount: a?.priceType === "per_variety" ? varietyQty(priced) : undefined,
       };
     });
     try {
@@ -573,12 +616,14 @@ export default function BookingWizard() {
               <Info className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: "var(--gold)" }} />
               <div>
                 <div className="font-semibold mb-1" style={{ color: "#2c1a26" }}>
-                  Notice: per-guest add-ons have a minimum charge
+                  How add-on pricing works
                 </div>
                 <p style={{ color: "var(--on-ivory-dim)" }}>
                   You currently have <b>{activeQuotation.guests.toLocaleString("en-IN")} guests</b>.
-                  {" "}If an extra says <b>Min 500 guests</b> (or another minimum), you still pay for that many —
-                  e.g. 100 guests → charged as <b>500 × rate</b>. Above the minimum, you pay for actual guests.
+                  {" "}<b>Per guest</b> and <b>per variety</b> extras bill on{" "}
+                  <b>rate × max(your guests, minimum)</b> — e.g. ₹110/guest with min 500 → ₹55,000 even for 100 guests.
+                  {" "}For <b>per variety</b>, also × how many flavours you pick (₹54 × 5 shakes × 500 = ₹1,35,000).
+                  {" "}<b>Per event</b> stays a flat one-time charge (e.g. hostess ₹6,600 — not × guests).
                   {" "}Package price always uses your real count only. Selected: <b>{selectedAddons.length}</b> extra(s).
                 </p>
               </div>
@@ -593,10 +638,19 @@ export default function BookingWizard() {
                 <div className="grid sm:grid-cols-2 gap-3">
                   {inspire.map((a) => {
                     const t = temptForAddon(a);
-                    const priceStr = a.priceType === "per_guest" ? `₹${a.price}/guest` : `₹${a.price}`;
+                    const priceStr =
+                      a.priceType === "per_guest"
+                        ? `₹${a.price}/guest`
+                        : a.priceType === "per_event"
+                          ? `₹${a.price}/event`
+                          : a.priceType === "per_variety"
+                            ? `₹${a.price}/variety`
+                            : `₹${a.price}`;
                     const isSel = selectedAddons.includes(a.id);
+                    const priced = { ...a, choice: activeQuotation.addonChoices[a.id] };
                     const badge = addonMinGuestsBadge(a);
-                    const note = isSel ? addonPricingNote(a, activeQuotation.guests) : addonPricingNote(a);
+                    const note = addonPricingNote(priced, activeQuotation.guests);
+                    const est = addonEstimatedLineLabel(priced, activeQuotation.guests);
                     return (
                       <button
                         key={a.id}
@@ -618,6 +672,7 @@ export default function BookingWizard() {
                           </span>
                         </div>
                         <p className="text-sm mt-1" style={{ color: "var(--on-ivory-dim)" }}>{t.vibe}</p>
+                        {est && <p className="text-[0.72rem] mt-1 font-semibold" style={{ color: "var(--anaar)" }}>{est}</p>}
                         {note && <p className="text-[0.72rem] mt-1.5" style={{ color: "var(--gold)" }}>{note}</p>}
                         <div className="mt-2 text-xs font-semibold" style={{ color: isSel ? "var(--gold)" : "var(--on-ivory-dim)" }}>
                           {isSel ? "✓ Added to your evening" : "+ Add to my event"}
@@ -645,33 +700,80 @@ export default function BookingWizard() {
             <div className="space-y-2 mb-8">
               {addons.filter((a) => a.category === activeAddonCat).map((a) => {
                 const isSel = selectedAddons.includes(a.id);
-                const priceStr = a.priceType === "per_guest" ? `₹${a.price}/guest` : `₹${a.price}`;
+                const choiceVal = activeQuotation.addonChoices[a.id];
+                const priced = { ...a, choice: choiceVal };
+                const priceStr =
+                  a.priceType === "per_guest"
+                    ? `₹${a.price}/guest`
+                    : a.priceType === "per_event"
+                      ? `₹${a.price}/event`
+                      : a.priceType === "per_variety"
+                        ? `₹${a.price}/variety`
+                        : `₹${a.price}`;
                 const t = temptForAddon(a);
                 const badge = addonMinGuestsBadge(a);
-                const note = isSel ? addonPricingNote(a, activeQuotation.guests) : addonPricingNote(a);
+                const note = addonPricingNote(priced, activeQuotation.guests);
+                const est = addonEstimatedLineLabel(priced, activeQuotation.guests);
+                const multi = a.priceType === "per_variety";
+                const picked = normalizeAddonChoices(choiceVal);
                 return (
-                  <button
+                  <div
                     key={a.id}
-                    onClick={() => toggleAddon(a.id)}
-                    className="w-full text-left p-4 rounded-lg flex gap-3 items-start"
+                    className="w-full text-left p-4 rounded-lg"
                     style={{ background: isSel ? "rgba(198,152,58,.15)" : "#fff", border: `1.5px solid ${isSel ? "var(--gold)" : "rgba(58,39,51,.12)"}` }}
                   >
-                    <span className="w-6 h-6 rounded-md border flex items-center justify-center flex-shrink-0 mt-0.5" style={isSel ? { background: "var(--gold)", borderColor: "var(--gold)" } : { borderColor: "rgba(58,39,51,.3)" }}>
-                      {isSel && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
-                    </span>
-                    <div className="flex-1">
-                      <div className="flex justify-between gap-3">
-                        <span className="font-display text-[1.1rem]">{a.name}{a.nv ? " · NV" : ""}</span>
-                        <span className="font-semibold whitespace-nowrap text-right" style={{ color: "var(--anaar)" }}>
-                          {priceStr}
-                          {badge && <span className="block text-[0.65rem] font-medium opacity-80">{badge}</span>}
-                        </span>
+                    <button
+                      type="button"
+                      onClick={() => toggleAddon(a.id)}
+                      className="w-full text-left flex gap-3 items-start"
+                    >
+                      <span className="w-6 h-6 rounded-md border flex items-center justify-center flex-shrink-0 mt-0.5" style={isSel ? { background: "var(--gold)", borderColor: "var(--gold)" } : { borderColor: "rgba(58,39,51,.3)" }}>
+                        {isSel && <Check className="w-3.5 h-3.5 text-white" strokeWidth={3} />}
+                      </span>
+                      <div className="flex-1">
+                        <div className="flex justify-between gap-3">
+                          <span className="font-display text-[1.1rem]">{a.name}{a.nv ? " · NV" : ""}</span>
+                          <span className="font-semibold whitespace-nowrap text-right" style={{ color: "var(--anaar)" }}>
+                            {priceStr}
+                            {badge && <span className="block text-[0.65rem] font-medium opacity-80">{badge}</span>}
+                          </span>
+                        </div>
+                        <div className="text-[0.7rem] font-semibold mt-0.5" style={{ color: "var(--gold)" }}>{t.hook}</div>
+                        {a.description && <div className="text-sm mt-1" style={{ color: "var(--on-ivory-dim)" }}>{a.description}</div>}
+                        {est && <div className="text-[0.72rem] mt-1 font-semibold" style={{ color: "var(--anaar)" }}>{est}</div>}
+                        {note && <div className="text-[0.72rem] mt-1.5" style={{ color: "var(--gold)" }}>{note}</div>}
                       </div>
-                      <div className="text-[0.7rem] font-semibold mt-0.5" style={{ color: "var(--gold)" }}>{t.hook}</div>
-                      {a.description && <div className="text-sm mt-1" style={{ color: "var(--on-ivory-dim)" }}>{a.description}</div>}
-                      {note && <div className="text-[0.72rem] mt-1.5" style={{ color: "var(--gold)" }}>{note}</div>}
-                    </div>
-                  </button>
+                    </button>
+                    {isSel && a.choices && a.choices.length > 0 && (
+                      <div className="ml-9 mt-3">
+                        <div className="text-[0.72rem] font-semibold mb-1.5" style={{ color: "#2c1a26" }}>
+                          {multi
+                            ? `Select varieties (each multiplies the price) · ${picked.length || 0} selected`
+                            : "Choose an option"}
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {a.choices.map((ch) => {
+                            const on = multi ? picked.includes(ch) : choiceVal === ch;
+                            return (
+                              <button
+                                key={ch}
+                                type="button"
+                                onClick={() => toggleAddonChoice(a.id, ch, multi)}
+                                className="px-2.5 py-1 rounded-md text-[0.72rem] font-medium"
+                                style={
+                                  on
+                                    ? { background: "var(--gold)", color: "#231318" }
+                                    : { background: "#fff", border: "1px solid rgba(58,39,51,.2)", color: "var(--on-ivory-dim)" }
+                                }
+                              >
+                                {ch}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    )}
+                  </div>
                 );
               })}
             </div>
@@ -986,15 +1088,13 @@ export default function BookingWizard() {
                   <Info className="w-4 h-4 mt-0.5 flex-shrink-0" style={{ color: "var(--gold-bright)" }} />
                   <div className="text-[0.84rem] leading-relaxed" style={{ color: "rgba(246,239,224,.88)" }}>
                     <div className="font-semibold mb-1" style={{ color: "var(--gold-bright)" }}>
-                      Minimum guest charge on per-guest add-ons
+                      How these extras are billed
                     </div>
                     <p>
                       Your party is <b style={{ color: "var(--ivory)" }}>{activeQuotation.guests.toLocaleString("en-IN")} guests</b>.
-                      {" "}For add-ons marked <b style={{ color: "var(--ivory)" }}>Min … guests</b>, you are still billed for that
-                      minimum even if your headcount is lower — e.g. 100 guests with a 500 minimum means the add-on is charged as{" "}
-                      <b style={{ color: "var(--ivory)" }}>500 × rate</b>, not 100.
-                      {" "}If your count is higher than the minimum, you pay for the actual count.
-                      {" "}The <b style={{ color: "var(--ivory)" }}>package</b> price always stays on your real guest count only.
+                      {" "}<b style={{ color: "var(--ivory)" }}>Per guest</b> / <b style={{ color: "var(--ivory)" }}>per variety</b>: rate × max(guests, minimum).
+                      {" "}Per variety also × flavours selected. <b style={{ color: "var(--ivory)" }}>Per event</b> stays flat (one charge).
+                      {" "}Package always uses your real guest count only.
                     </p>
                   </div>
                 </div>
@@ -1003,11 +1103,14 @@ export default function BookingWizard() {
                   {selectedAddons.map((id) => {
                     const a = getAddon(id);
                     if (!a) return null;
-                    const line = addonLineTotal(a, activeQuotation.guests);
+                    const choice = activeQuotation.addonChoices[id];
+                    const priced = { ...a, choice };
+                    const line = addonLineTotal(priced, activeQuotation.guests);
                     const billed = billableGuests(activeQuotation.guests, a.guestRange);
                     const floored = addonUsesGuestFloor(activeQuotation.guests, a.guestRange);
                     const badge = addonMinGuestsBadge(a);
-                    const choice = activeQuotation.addonChoices[id];
+                    const note = addonPricingNote(priced, activeQuotation.guests);
+                    const choiceLabel = formatAddonChoiceLabel(choice);
                     const unitLabel =
                       a.priceType === "per_guest"
                         ? `/guest`
@@ -1044,23 +1147,32 @@ export default function BookingWizard() {
                               </span>
                             )}
                           </div>
-                          {choice && (
+                          {choiceLabel && (
                             <div className="text-[0.78rem] mb-1" style={{ color: "rgba(226,182,88,.85)" }}>
-                              Choice: {choice}
+                              {a.priceType === "per_variety" ? "Varieties" : "Choice"}: {choiceLabel}
                             </div>
                           )}
                           <div className="text-[0.78rem]" style={{ color: "rgba(246,239,224,.58)" }}>
                             ₹{a.price.toLocaleString("en-IN")}
                             {unitLabel}
-                            {a.priceType === "per_guest" && (
+                            {addonScalesWithGuests(a.priceType) && (
                               <>
                                 {" · "}
+                                {a.priceType === "per_variety" && (
+                                  <>{varietyQty(priced)} variety{varietyQty(priced) > 1 ? "ies" : ""} · </>
+                                )}
                                 {floored
-                                  ? `billed for ${billed.toLocaleString("en-IN")} guests (min range; party has ${activeQuotation.guests})`
+                                  ? `billed for ${billed.toLocaleString("en-IN")} guests (min; party has ${activeQuotation.guests})`
                                   : `× ${billed.toLocaleString("en-IN")} guests`}
                               </>
                             )}
+                            {(a.priceType === "per_event" || a.priceType === "flat") && <> · flat / event</>}
                           </div>
+                          {note && (
+                            <div className="text-[0.72rem] mt-1" style={{ color: "rgba(226,182,88,.9)" }}>
+                              {note}
+                            </div>
+                          )}
                         </div>
                         <div className="flex items-center gap-3 sm:flex-col sm:items-end sm:gap-2 flex-shrink-0">
                           <div className="font-display text-[1.25rem] whitespace-nowrap" style={{ color: "var(--gold-bright)" }}>

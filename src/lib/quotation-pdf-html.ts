@@ -1,13 +1,14 @@
 import { CONFIG } from "@/lib/rasa-data";
-import { addonLineTotal, billableGuests, addonUsesGuestFloor } from "@/lib/addon-pricing";
+import { addonLineTotal, addonPricingNote, formatAddonChoiceLabel } from "@/lib/addon-pricing";
 
 export type QuotationAddonLine = {
   id?: string;
   name: string;
   price: number;
   priceType: string;
-  choice?: string | null;
+  choice?: string | string[] | null;
   guestRange?: number;
+  varietyCount?: number;
 };
 
 export type QuotationPdfData = {
@@ -55,6 +56,7 @@ function fmtMoney(n: number): string {
 function fmtUnit(priceType: string): string {
   if (priceType === "per_guest") return "/guest";
   if (priceType === "per_event") return "/event";
+  if (priceType === "per_variety") return "/variety";
   return priceType || "";
 }
 
@@ -96,16 +98,15 @@ export function buildQuotationHTML(d: QuotationPdfData): string {
   const addonRows = d.addons
     .map((a) => {
       const line = addonLineTotal(a, d.guests);
-      const billed = billableGuests(d.guests, a.guestRange);
-      const floored = addonUsesGuestFloor(d.guests, a.guestRange);
-      const name = a.choice ? `${a.name} (${a.choice})` : a.name;
-      const unitNote =
-        a.priceType === "per_guest" && floored
-          ? ` × ${billed} (min range)`
-          : esc(fmtUnit(a.priceType));
+      const note = addonPricingNote(a, d.guests);
+      const choiceLabel = formatAddonChoiceLabel(a.choice);
+      const name = choiceLabel ? `${a.name} (${choiceLabel})` : a.name;
+      const noteCell = note
+        ? `<div class="addon-note">${esc(note)}</div>`
+        : "";
       return `<tr>
-        <td>${esc(name)}</td>
-        <td class="nowrap">${fmtMoney(a.price)}${unitNote}</td>
+        <td>${esc(name)}${noteCell}</td>
+        <td class="nowrap">${fmtMoney(a.price)}${esc(fmtUnit(a.priceType))}</td>
         <td class="right">${fmtMoney(line)}</td>
       </tr>`;
     })
@@ -217,6 +218,7 @@ export function buildQuotationHTML(d: QuotationPdfData): string {
     color: var(--muted); border-bottom: 1px solid var(--line); padding: 3px 4px; font-weight: 700;
   }
   table.addons td { padding: 3px 4px; border-bottom: 1px solid #f1ebe1; }
+  .addon-note { font-size: 8.5px; color: var(--muted); margin-top: 2px; line-height: 1.35; max-width: 280px; }
   .right { text-align: right; }
   .nowrap { white-space: nowrap; }
 

@@ -3,7 +3,7 @@ import { useState } from "react";
 import { useApp } from "@/store/app-store";
 import { CONFIG } from "@/lib/rasa-data";
 import { useCatalog } from "@/store/catalog-store";
-import { addonLineTotal, billableGuests, addonUsesGuestFloor, addonPricingNote } from "@/lib/addon-pricing";
+import { addonLineTotal, addonPricingNote, formatAddonChoiceLabel, varietyQty } from "@/lib/addon-pricing";
 import PromoCodeInput from "@/components/rasa/promo-code-input";
 import PayBookingPanel from "@/components/rasa/pay-booking-panel";
 import { X, ArrowRight, CheckCircle, Calendar, MapPin, Users, FileText, Share2 } from "lucide-react";
@@ -37,7 +37,10 @@ export default function QuotationPanel() {
     const addonsTotal = activeQuotation.selectedAddons.reduce((sum, id) => {
       const a = getAddon(id);
       if (!a) return sum;
-      return sum + addonLineTotal(a, activeQuotation.guests);
+      return sum + addonLineTotal(
+        { ...a, choice: activeQuotation.addonChoices[id] },
+        activeQuotation.guests
+      );
     }, 0);
     const subtotal = pkgTotal + addonsTotal;
     const gst = Math.round(subtotal * 0.05);
@@ -96,13 +99,15 @@ export default function QuotationPanel() {
           menuSnapshot: activeQuotation.selectedDishes,
           addonsSnapshot: activeQuotation.selectedAddons.map((id) => {
             const a = getAddon(id);
+            const choice = activeQuotation.addonChoices[id] || null;
             return {
               id,
               name: a?.name,
               price: a?.price,
               priceType: a?.priceType,
               guestRange: a?.guestRange || 0,
-              choice: activeQuotation.addonChoices[id] || null,
+              choice,
+              varietyCount: a?.priceType === "per_variety" ? varietyQty({ ...a, choice }) : undefined,
             };
           }),
           customDishes: activeQuotation.customDishes,
@@ -195,23 +200,22 @@ export default function QuotationPanel() {
                 {activeQuotation.selectedAddons.map((id) => {
                   const a = getAddon(id);
                   if (!a) return null;
-                  const price = addonLineTotal(a, activeQuotation.guests);
-                  const billed = billableGuests(activeQuotation.guests, a.guestRange);
-                  const floored = addonUsesGuestFloor(activeQuotation.guests, a.guestRange);
+                  const choice = activeQuotation.addonChoices[id];
+                  const priced = { ...a, choice };
+                  const price = addonLineTotal(priced, activeQuotation.guests);
+                  const note = addonPricingNote(priced, activeQuotation.guests);
+                  const choiceLabel = formatAddonChoiceLabel(choice);
                   return (
-                    <div key={id} className="flex justify-between text-[0.9rem] py-1" style={{ color: "#2c1a26" }}>
-                      <span>
-                        {a.name}{activeQuotation.addonChoices[id] ? ` · ${activeQuotation.addonChoices[id]}` : ""}
-                        {a.priceType === "per_guest" && (
-                          <span className="block text-[0.72rem]" style={{ color: "var(--on-ivory-dim)" }}>
-                            {addonPricingNote(a, activeQuotation.guests) ||
-                              (floored
-                                ? `₹${a.price} × ${billed} guests (min range)`
-                                : `₹${a.price} × ${billed} guests`)}
+                    <div key={id} className="flex justify-between text-[0.9rem] py-1 gap-3" style={{ color: "#2c1a26" }}>
+                      <span className="min-w-0 flex-1">
+                        {a.name}{choiceLabel ? ` · ${choiceLabel}` : ""}
+                        {note && (
+                          <span className="block text-[0.72rem] mt-0.5" style={{ color: "var(--on-ivory-dim)" }}>
+                            {note}
                           </span>
                         )}
                       </span>
-                      <span className="font-semibold" style={{ color: "var(--anaar)" }}>₹{price.toLocaleString("en-IN")}</span>
+                      <span className="font-semibold flex-shrink-0" style={{ color: "var(--anaar)" }}>₹{price.toLocaleString("en-IN")}</span>
                     </div>
                   );
                 })}

@@ -54,14 +54,23 @@ function parseAddons(raw: string | null | undefined): QuotationAddonLine[] {
   try {
     const parsed = JSON.parse(raw);
     if (!Array.isArray(parsed)) return [];
-    return parsed.map((a: Record<string, unknown>) => ({
-      id: typeof a.id === "string" ? a.id : undefined,
-      name: String(a.name || "Add-on"),
-      price: Number(a.price) || 0,
-      priceType: String(a.priceType || "per_event"),
-      choice: a.choice != null ? String(a.choice) : null,
-      guestRange: Number(a.guestRange) || 0,
-    }));
+    return parsed.map((a: Record<string, unknown>) => {
+      let choice: string | string[] | null = null;
+      if (Array.isArray(a.choice)) {
+        choice = a.choice.map(String).filter(Boolean);
+      } else if (a.choice != null && String(a.choice).trim()) {
+        choice = String(a.choice);
+      }
+      return {
+        id: typeof a.id === "string" ? a.id : undefined,
+        name: String(a.name || "Add-on"),
+        price: Number(a.price) || 0,
+        priceType: String(a.priceType || "per_event"),
+        choice,
+        guestRange: Number(a.guestRange) || 0,
+        varietyCount: a.varietyCount != null ? Number(a.varietyCount) || undefined : undefined,
+      };
+    });
   } catch {
     return [];
   }

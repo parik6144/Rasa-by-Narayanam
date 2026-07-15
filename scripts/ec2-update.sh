@@ -70,6 +70,7 @@ echo "== seed staff / promos / payments demo (idempotent) =="
 node scripts/seed-staff.js || true
 node scripts/seed-promos-demo.js || true
 node scripts/seed-payments-demo.js || true
+node scripts/seed-variety-choices.js || true
 
 echo "== build =="
 export NODE_OPTIONS="--max-old-space-size=700"

@@ -4,7 +4,7 @@ import { useApp } from "@/store/app-store";
 import { useCatalog } from "@/store/catalog-store";
 import { CONFIG } from "@/lib/rasa-data";
 import { parseSelection, isSectionComplete } from "@/lib/selection";
-import { addonLineTotal, addonMinGuestsBadge, addonPricingNote } from "@/lib/addon-pricing";
+import { addonLineTotal, addonMinGuestsBadge, addonPricingNote, addonEstimatedLineLabel, normalizeAddonChoices } from "@/lib/addon-pricing";
 import { X, Plus, Check, ArrowRight, ArrowLeft, Minus, Sparkles, Share2, Info } from "lucide-react";
 
 export default function MenuBuilder() {
@@ -48,20 +48,31 @@ export default function MenuBuilder() {
 
   const toggleAddon = (id: string) => {
     if (selectedAddons.includes(id)) {
-      setActiveQuotation({ selectedAddons: selectedAddons.filter((a) => a !== id) });
+      const nextChoices = { ...activeQuotation.addonChoices };
+      delete nextChoices[id];
+      setActiveQuotation({
+        selectedAddons: selectedAddons.filter((a) => a !== id),
+        addonChoices: nextChoices,
+      });
     } else {
       setActiveQuotation({ selectedAddons: [...selectedAddons, id] });
     }
   };
 
-  const toggleAddonChoice = (addonId: string, choice: string) => {
+  const toggleAddonChoice = (addonId: string, choice: string, multi = false) => {
     const cur = activeQuotation.addonChoices[addonId];
-    const nextChoice = cur === choice ? null : choice;
+    let next: string | string[] | null;
+    if (multi) {
+      const list = normalizeAddonChoices(cur);
+      next = list.includes(choice) ? list.filter((c) => c !== choice) : [...list, choice];
+    } else {
+      next = cur === choice ? null : choice;
+    }
     setActiveQuotation({
       selectedAddons: selectedAddons.includes(addonId) ? selectedAddons : [...selectedAddons, addonId],
       addonChoices: {
         ...activeQuotation.addonChoices,
-        [addonId]: nextChoice,
+        [addonId]: next,
       },
     });
   };
@@ -84,7 +95,10 @@ export default function MenuBuilder() {
     const addonsTotal = selectedAddons.reduce((sum, id) => {
       const a = addons.find((x) => x.id === id);
       if (!a) return sum;
-      return sum + addonLineTotal(a, activeQuotation.guests);
+      return sum + addonLineTotal(
+        { ...a, choice: activeQuotation.addonChoices[id] },
+        activeQuotation.guests
+      );
     }, 0);
     const subtotal = pkgTotal + addonsTotal;
     const gst = Math.round(subtotal * 0.05);
@@ -327,7 +341,7 @@ export default function MenuBuilder() {
               <div className="mb-4 p-3 rounded-md" style={{ background: "rgba(198,152,58,.08)", border: "1px solid var(--paper-line)" }}>
                 <p className="text-[0.82rem]" style={{ color: "var(--on-ivory-dim)" }}>
                   <b style={{ color: "#2c1a26" }}>Add-ons are optional.</b> Live stations, regional thalis, mithai, frozen theatre, and mansahari — pick any on top of your package.
-                  {" "}Per-guest extras with a guest minimum are billed on <b style={{ color: "#2c1a26" }}>max({activeQuotation.guests} guests, that minimum)</b> in your quotation.
+                  {" "}Per guest / per variety extras bill on <b style={{ color: "#2c1a26" }}>rate × max({activeQuotation.guests} guests, min)</b>; per variety also × flavours picked. Per event stays flat once.
                 </p>
               </div>
               <div className="flex flex-wrap gap-2 mb-4">
@@ -346,9 +360,21 @@ export default function MenuBuilder() {
               </div>
               {visibleAddons.map((a) => {
                 const isSel = selectedAddons.includes(a.id);
-                const priceStr = a.priceType === "per_guest" ? `₹${a.price}/guest` : a.priceType === "per_event" ? `₹${a.price}/event` : `₹${a.price}`;
+                const choiceVal = activeQuotation.addonChoices[a.id];
+                const priced = { ...a, choice: choiceVal };
+                const priceStr =
+                  a.priceType === "per_guest"
+                    ? `₹${a.price}/guest`
+                    : a.priceType === "per_event"
+                      ? `₹${a.price}/event`
+                      : a.priceType === "per_variety"
+                        ? `₹${a.price}/variety`
+                        : `₹${a.price}`;
                 const badge = addonMinGuestsBadge(a);
-                const note = isSel ? addonPricingNote(a, activeQuotation.guests) : addonPricingNote(a);
+                const note = addonPricingNote(priced, activeQuotation.guests);
+                const est = addonEstimatedLineLabel(priced, activeQuotation.guests);
+                const multi = a.priceType === "per_variety";
+                const pickedList = normalizeAddonChoices(choiceVal);
                 return (
                   <div key={a.id} className="py-4 border-b" style={{ borderColor: "rgba(58,39,51,.14)" }}>
                     <button onClick={() => toggleAddon(a.id)} className="flex gap-3 items-start w-full text-left">
@@ -367,26 +393,35 @@ export default function MenuBuilder() {
                           </div>
                         </div>
                         <div className="text-[0.88rem] font-light mt-1" style={{ color: "var(--on-ivory-dim)" }}>{a.description}</div>
+                        {est && <div className="text-[0.72rem] mt-1 font-semibold" style={{ color: "var(--anaar)" }}>{est}</div>}
                         {note && <div className="text-[0.72rem] mt-1.5" style={{ color: "var(--gold)" }}>{note}</div>}
                       </div>
                     </button>
                     {isSel && a.choices && a.choices.length > 0 && (
-                      <div className="ml-9 mt-2 flex flex-wrap gap-1.5">
-                        {a.choices.map((ch) => {
-                          const picked = activeQuotation.addonChoices[a.id] === ch;
-                          return (
-                            <button
-                              key={ch}
-                              onClick={() => toggleAddonChoice(a.id, ch)}
-                              className="text-[0.72rem] px-2.5 py-1 rounded-full"
-                              style={picked
-                                ? { background: "var(--gold)", color: "#231318", fontWeight: 600 }
-                                : { background: "rgba(198,152,58,.08)", border: "1px solid rgba(58,39,51,.2)", color: "var(--on-ivory-dim)" }}
-                            >
-                              {ch}
-                            </button>
-                          );
-                        })}
+                      <div className="ml-9 mt-2">
+                        <div className="text-[0.7rem] font-semibold mb-1.5" style={{ color: "#2c1a26" }}>
+                          {multi
+                            ? `Pick varieties (${pickedList.length || 0} selected — each multiplies price)`
+                            : "Choose an option"}
+                        </div>
+                        <div className="flex flex-wrap gap-1.5">
+                          {a.choices.map((ch) => {
+                            const on = multi ? pickedList.includes(ch) : choiceVal === ch;
+                            return (
+                              <button
+                                key={ch}
+                                type="button"
+                                onClick={() => toggleAddonChoice(a.id, ch, multi)}
+                                className="text-[0.72rem] px-2.5 py-1 rounded-full"
+                                style={on
+                                  ? { background: "var(--gold)", color: "#231318", fontWeight: 600 }
+                                  : { background: "rgba(198,152,58,.08)", border: "1px solid rgba(58,39,51,.2)", color: "var(--on-ivory-dim)" }}
+                              >
+                                {ch}
+                              </button>
+                            );
+                          })}
+                        </div>
                       </div>
                     )}
                   </div>

@@ -70,13 +70,25 @@ export async function findValidPromo(codeRaw: string): Promise<PromoLike | null>
 }
 
 function addonLinePaise(
-  a: { price?: number; priceType?: string; guestRange?: number },
+  a: {
+    price?: number;
+    priceType?: string;
+    guestRange?: number;
+    choice?: string | string[] | null;
+    varietyCount?: number;
+  },
   guests: number
 ): number {
   if (!a.price) return 0;
   const paise = a.price < 5000 ? a.price * 100 : a.price;
   return addonLineTotal(
-    { price: paise, priceType: a.priceType, guestRange: a.guestRange },
+    {
+      price: paise,
+      priceType: a.priceType,
+      guestRange: a.guestRange,
+      choice: a.choice,
+      varietyCount: a.varietyCount,
+    },
     guests
   );
 }
@@ -103,8 +115,16 @@ export async function repriceBookingMoney(
     const addons = JSON.parse(booking.addonsSnapshot || "[]");
     if (Array.isArray(addons)) {
       addonsTotal = addons.reduce(
-        (sum: number, a: { price?: number; priceType?: string; guestRange?: number }) =>
-          sum + addonLinePaise(a, booking.guests),
+        (
+          sum: number,
+          a: {
+            price?: number;
+            priceType?: string;
+            guestRange?: number;
+            choice?: string | string[] | null;
+            varietyCount?: number;
+          }
+        ) => sum + addonLinePaise(a, booking.guests),
         0
       );
     }

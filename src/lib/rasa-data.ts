@@ -1652,7 +1652,7 @@ export const ADDONS: Addon[] = [
     "priceType": "per_variety",
     "category": "Beverages & Welcome",
     "nv": false,
-    "choices": []
+    "choices": ["Sweet Lime", "Orange", "Pineapple", "Red Grapes", "Green Grapes", "Watermelon", "Pomegranate"]
   },
   {
     "id": "premium-shakes-per-variety",
@@ -1662,7 +1662,7 @@ export const ADDONS: Addon[] = [
     "priceType": "per_variety",
     "category": "Beverages & Welcome",
     "nv": false,
-    "choices": []
+    "choices": ["Vanilla", "Chocolate", "Strawberry", "Mango", "Oreo", "Rose Thandai"]
   },
   {
     "id": "super-premium-shakes-per-variety",
@@ -1672,7 +1672,7 @@ export const ADDONS: Addon[] = [
     "priceType": "per_variety",
     "category": "Beverages & Welcome",
     "nv": false,
-    "choices": []
+    "choices": ["Saffron Pistachio", "Belgian Chocolate", "Matcha", "Baklava", "Kesar Badam"]
   },
   {
     "id": "standard-bar-package",

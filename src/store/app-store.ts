@@ -77,7 +77,7 @@ interface AppState {
     guests: number;
     selectedDishes: Record<string, string[]>;
     selectedAddons: string[];
-    addonChoices?: Record<string, string | null>;
+    addonChoices?: Record<string, string | string[] | null>;
     customDishes: string[];
     eventDate?: string;
     venue?: string;
@@ -99,7 +99,7 @@ interface AppState {
     guests: number;
     selectedDishes: Record<string, string[]>;
     selectedAddons: string[];
-    addonChoices: Record<string, string | null>;
+    addonChoices: Record<string, string | string[] | null>;
     customDishes: string[];
     eventDate?: string;
     venue?: string;
@@ -119,7 +119,7 @@ const emptyQuote = {
   guests: 100,
   selectedDishes: {} as Record<string, string[]>,
   selectedAddons: [] as string[],
-  addonChoices: {} as Record<string, string | null>,
+  addonChoices: {} as Record<string, string | string[] | null>,
   customDishes: [] as string[],
   eventDate: undefined as string | undefined,
   venue: undefined as string | undefined,

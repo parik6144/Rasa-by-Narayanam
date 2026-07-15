@@ -1,6 +1,7 @@
 "use client";
 import { useState, useEffect, useCallback, type ReactNode, type CSSProperties } from "react";
 import { useApp } from "@/store/app-store";
+import { addonPricingNote } from "@/lib/addon-pricing";
 import { Plus, Pencil, Trash2, X, ChevronDown, ChevronRight, Save, Eye, EyeOff, Star } from "lucide-react";
 
 interface SectionDish {
@@ -309,9 +310,9 @@ export default function AdminCatalog() {
           <div className="mb-4 p-3 rounded-lg text-sm flex items-start gap-2" style={{ background: "rgba(198,152,58,.1)", border: "1px solid rgba(198,152,58,.28)" }}>
             <span style={{ color: "var(--gold-bright)" }}>ⓘ</span>
             <span style={{ color: "rgba(246,239,224,.78)" }}>
-              <b style={{ color: "var(--ivory)" }}>Per-guest add-ons</b> use a minimum billable guest count (Guest range).
-              Package price still uses the actual headcount; for these extras the quotation charges
-              <b style={{ color: "var(--gold-bright)" }}> max(your guests, guest range)</b>.
+              <b style={{ color: "var(--ivory)" }}>Per guest / per variety</b> bill on
+              <b style={{ color: "var(--gold-bright)" }}> rate × max(guests, guest range)</b>
+              {" "}(per variety also × flavours picked). <b style={{ color: "var(--ivory)" }}>Per event</b> stays flat once.
               Edit any card to change the range (e.g. 500).
             </span>
           </div>
@@ -332,9 +333,14 @@ export default function AdminCatalog() {
                         <span className="font-medium" style={{ color: "var(--ivory)" }}>{a.name}</span>
                         {a.isNv && <span className="text-[0.6rem] font-bold px-1.5 py-0.5 rounded" style={{ background: "#c0392b", color: "#fff" }}>NV</span>}
                         {!a.isActive && <span className="text-[0.66rem] uppercase px-2 py-0.5 rounded-full" style={{ background: "rgba(156,42,56,.2)", color: "var(--anaar-bright)" }}>Off</span>}
-                        {a.priceType === "per_guest" && a.guestRange > 0 && (
+                        {a.guestRange > 0 && (a.priceType === "per_guest" || a.priceType === "per_variety") && (
                           <span className="text-[0.62rem] font-bold tracking-wide uppercase px-2 py-0.5 rounded-full" style={{ background: "rgba(198,152,58,.2)", color: "var(--gold-bright)", border: "1px solid rgba(198,152,58,.45)" }}>
                             Min {a.guestRange} guests
+                          </span>
+                        )}
+                        {a.priceType === "per_event" && (
+                          <span className="text-[0.62rem] font-bold tracking-wide uppercase px-2 py-0.5 rounded-full" style={{ background: "rgba(246,239,224,.08)", color: "rgba(246,239,224,.7)", border: "1px solid rgba(246,239,224,.2)" }}>
+                            Flat / event
                           </span>
                         )}
                       </div>
@@ -342,10 +348,9 @@ export default function AdminCatalog() {
                         ₹{a.price} · {a.priceType}
                         {a.description ? ` · ${a.description.slice(0, 80)}${a.description.length > 80 ? "…" : ""}` : ""}
                       </div>
-                      {a.priceType === "per_guest" && a.guestRange > 0 && (
+                      {addonPricingNote(a) && (
                         <div className="mt-1.5 text-[0.72rem]" style={{ color: "rgba(226,182,88,.85)" }}>
-                          Quotation bills ₹{a.price} × at least {a.guestRange} guests
-                          {" "}(= ₹{(a.price * a.guestRange).toLocaleString("en-IN")} minimum), then actual guests if higher.
+                          {addonPricingNote(a)}
                         </div>
                       )}
                       {a.choices.length > 0 && (

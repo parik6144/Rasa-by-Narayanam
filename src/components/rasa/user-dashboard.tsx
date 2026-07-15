@@ -91,10 +91,11 @@ export default function UserDashboard() {
     const menu = parseJson<Record<string, string[]>>(b.menuSnapshot, {});
     const addonsRaw = parseJson<Array<{ id?: string } | string>>(b.addonsSnapshot, []);
     const selectedAddons = addonsRaw.map((a) => (typeof a === "string" ? a : a.id || "")).filter(Boolean);
-    const addonChoices: Record<string, string | null> = {};
+    const addonChoices: Record<string, string | string[] | null> = {};
     addonsRaw.forEach((a) => {
       if (typeof a === "object" && a.id && "choice" in a) {
-        addonChoices[a.id] = (a as { choice?: string | null }).choice || null;
+        const c = (a as { choice?: string | string[] | null }).choice;
+        addonChoices[a.id] = c ?? null;
       }
     });
     const custom = parseJson<string[]>(b.customDishes, []);
